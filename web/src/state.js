@@ -207,6 +207,11 @@ export function courseCenter(event, fallback) {
   return weight ? { lat: lat / weight, lon: lon / weight } : fallback;
 }
 
+/** Metres along a path of lat/lon points. */
+export function pathLength(points) {
+  return polylineLength(points);
+}
+
 function polylineLength(points) {
   let total = 0;
   for (let i = 1; i < points.length; i++) total += haversineM(points[i - 1], points[i]);

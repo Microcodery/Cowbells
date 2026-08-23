@@ -5,7 +5,7 @@ const START = "#16a34a";
 const FINISH = "#dc2626";
 
 /** Names are prefixed so they never collide with the basemap sprite's own icons. */
-export const ICON_PREFIX = "birdeye-";
+export const ICON_PREFIX = "birdseye-";
 
 /** `{ name: ImageData }` for every icon the map layers reference, drawn at 2× for crisp edges. */
 export function icons() {

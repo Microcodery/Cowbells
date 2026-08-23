@@ -1,4 +1,4 @@
-//! Domain model, geometry, and trajectories for birdeye.
+//! Domain model, geometry, and trajectories for birdseye.
 
 pub mod geom;
 pub mod gpx;

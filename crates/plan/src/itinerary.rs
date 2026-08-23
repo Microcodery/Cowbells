@@ -1,8 +1,8 @@
 //! Wires the pieces together and turns a plan back into a human-facing itinerary.
 
-use birdeye_core::geom::{Point, Projection};
-use birdeye_core::{Event, LatLon, Seconds};
-use birdeye_routing::{NodeId, TravelTime};
+use birdseye_core::geom::{Point, Projection};
+use birdseye_core::{Event, LatLon, Seconds};
+use birdseye_routing::{NodeId, TravelTime};
 use fixedbitset::FixedBitSet;
 use geo::{Distance, Euclidean};
 use serde::Serialize;
@@ -201,8 +201,8 @@ pub fn solve_with(
 
 #[cfg(test)]
 mod tests {
-    use birdeye_core::*;
-    use birdeye_routing::Graph;
+    use birdseye_core::*;
+    use birdseye_routing::Graph;
 
     use super::*;
     use crate::trace::LabelEvent;

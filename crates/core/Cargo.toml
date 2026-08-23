@@ -1,5 +1,5 @@
 [package]
-name = "birdeye-core"
+name = "birdseye-core"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

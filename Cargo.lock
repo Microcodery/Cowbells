@@ -42,7 +42,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
 
 [[package]]
-name = "birdeye-core"
+name = "birdseye-core"
 version = "0.1.0"
 dependencies = [
  "approx",
@@ -57,12 +57,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "birdeye-plan"
+name = "birdseye-plan"
 version = "0.1.0"
 dependencies = [
  "approx",
- "birdeye-core",
- "birdeye-routing",
+ "birdseye-core",
+ "birdseye-routing",
  "fixedbitset",
  "geo",
  "rstar 0.13.0",
@@ -71,11 +71,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "birdeye-routing"
+name = "birdseye-routing"
 version = "0.1.0"
 dependencies = [
  "approx",
- "birdeye-core",
+ "birdseye-core",
  "geo",
  "rstar 0.13.0",
  "serde",
@@ -83,12 +83,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "birdeye-wasm"
+name = "birdseye-wasm"
 version = "0.1.0"
 dependencies = [
- "birdeye-core",
- "birdeye-plan",
- "birdeye-routing",
+ "birdseye-core",
+ "birdseye-plan",
+ "birdseye-routing",
  "js-sys",
  "serde",
  "serde_json",

@@ -1,10 +1,10 @@
-# birdeye — Product Specification (v1)
+# birdseye — Product Specification (v1)
 
 ## Purpose
 
-birdeye helps a race spectator answer one question: **where should I stand, and when, to see the racers I care about as many times as possible?**
+birdseye helps a race spectator answer one question: **where should I stand, and when, to see the racers I care about as many times as possible?**
 
-The user describes an event (courses, racers, paces) and themselves (where they start, how they move). birdeye produces an itinerary: an ordered list of stops with arrival/departure times and the racers expected at each.
+The user describes an event (courses, racers, paces) and themselves (where they start, how they move). birdseye produces an itinerary: an ordered list of stops with arrival/departure times and the racers expected at each.
 
 It runs entirely in the browser as a static web page. No account, no server-side compute, no data leaves the user's machine except map tile and OpenStreetMap data requests.
 

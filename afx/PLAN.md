@@ -1,4 +1,4 @@
-# birdeye — Implementation Plan
+# birdseye — Implementation Plan
 
 Phases → milestones → tasks. Each milestone ends in a working, tested state and a single squashed commit. Design in [EDD.md](EDD.md); requirements in [SPEC.md](SPEC.md).
 

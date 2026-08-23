@@ -1,12 +1,12 @@
 [package]
-name = "birdeye-plan"
+name = "birdseye-plan"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [dependencies]
-birdeye-core.workspace = true
-birdeye-routing.workspace = true
+birdseye-core.workspace = true
+birdseye-routing.workspace = true
 fixedbitset = "0.5.7"
 geo = { version = "0.33.1", default-features = false }
 rstar = "0.13.0"

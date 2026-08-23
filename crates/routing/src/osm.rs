@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use birdeye_core::LatLon;
+use birdseye_core::LatLon;
 use serde::Deserialize;
 
 pub type Tags = HashMap<String, String>;

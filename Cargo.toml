@@ -8,9 +8,9 @@ edition = "2024"
 license = "AGPL-3.0-only"
 
 [workspace.dependencies]
-birdeye-core = { path = "crates/core" }
-birdeye-routing = { path = "crates/routing" }
-birdeye-plan = { path = "crates/plan" }
+birdseye-core = { path = "crates/core" }
+birdseye-routing = { path = "crates/routing" }
+birdseye-plan = { path = "crates/plan" }
 
 [profile.release]
 opt-level = "s"

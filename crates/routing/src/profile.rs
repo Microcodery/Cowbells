@@ -1,6 +1,6 @@
 //! Which OSM ways each travel mode may use, how fast, and in which direction.
 
-use birdeye_core::TravelMode;
+use birdseye_core::TravelMode;
 
 use crate::osm::Way;
 

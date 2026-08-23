@@ -7,9 +7,9 @@ import { bbox, covers, fetchOsm } from "./overpass.js";
 import { esc, renderHeader, renderPanel } from "./panel.js";
 import * as state from "./state.js";
 
-const STORAGE_KEY = "birdeye.event";
-const UNITS_KEY = "birdeye.units";
-const TIER_KEY = "birdeye.tier";
+const STORAGE_KEY = "birdseye.event";
+const UNITS_KEY = "birdseye.units";
+const TIER_KEY = "birdseye.tier";
 const DEFAULT_CENTER = { lat: 45.5231, lon: -122.6765 };
 const AUTOSAVE_DELAY_MS = 500;
 
@@ -43,7 +43,7 @@ const scan = document.getElementById("scan");
 /** On phones the panel covers the map; planning closes it so the progress is visible. */
 const closePanelOnPhones = () => matchMedia("(max-width: 700px)").matches && document.body.classList.remove("panel-open");
 map.on("layers-ready", draw);
-window.birdeye = { map, event: () => event };
+window.birdseye = { map, event: () => event };
 
 let autosave;
 function draw() {
@@ -366,11 +366,8 @@ const actions = {
       if (problems.length) throw new Error(problems.join("; "));
       // The previous itinerary fades out while the engine's progress plays, and the new one fades in after.
       revealItinerary(map, false);
-      const reported = (text) => {
-        scan.hidden = true;
-        narrate(text);
-      };
-      const live = liveReplay(replayCanvas(map), event.spectator.sighting_radius_m, reported);
+      const radius = event.spectator.sighting_radius_m;
+      const live = liveReplay(replayCanvas(map), radius, narrate, () => (scan.hidden = true));
       const itinerary = await engine.call("plan", { event, options: { beam: ui.beam, trace: true } }, live.push);
       await live.finish();
       ui.itinerary = itinerary;

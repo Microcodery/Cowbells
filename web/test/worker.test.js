@@ -7,7 +7,7 @@ describe("engine", () => {
 
   it("round-trips a ping through the WASM engine", async () => {
     const reply = await engine.call("ping", { msg: "hello" });
-    expect(reply).toMatch(/^birdeye \d+\.\d+\.\d+: hello$/);
+    expect(reply).toMatch(/^birdseye \d+\.\d+\.\d+: hello$/);
   });
 
   it("validates an event and reports problems", async () => {

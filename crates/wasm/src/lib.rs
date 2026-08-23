@@ -1,11 +1,11 @@
-//! wasm-bindgen facade over the birdeye engine. Everything crosses as JSON strings.
+//! wasm-bindgen facade over the birdseye engine. Everything crosses as JSON strings.
 
-use birdeye_core::geom::{Point, Projection};
-use birdeye_core::{Event, TravelMode};
-use birdeye_plan::trace::network_trace;
-use birdeye_plan::{Options, Progress};
-use birdeye_routing::profile::default_speed;
-use birdeye_routing::{Graph, Osm, TravelTime};
+use birdseye_core::geom::{Point, Projection};
+use birdseye_core::{Event, TravelMode};
+use birdseye_plan::trace::network_trace;
+use birdseye_plan::{Options, Progress};
+use birdseye_routing::profile::default_speed;
+use birdseye_routing::{Graph, Osm, TravelTime};
 use serde::Deserialize;
 use wasm_bindgen::prelude::*;
 
@@ -17,7 +17,7 @@ const ROADWAY_M: f64 = 3.0;
 
 #[wasm_bindgen]
 pub fn ping(msg: &str) -> String {
-    format!("birdeye {}: {msg}", birdeye_core::VERSION)
+    format!("birdseye {}: {msg}", birdseye_core::VERSION)
 }
 
 /// Validation errors for an event JSON document, as a JSON array of strings (empty when valid).
@@ -35,7 +35,7 @@ pub fn validate(event_json: &str) -> Result<String, JsError> {
 /// file name's extension, as JSON.
 #[wasm_bindgen]
 pub fn parse_courses(file_name: &str, bytes: &[u8]) -> Result<String, JsError> {
-    let courses = birdeye_core::import::courses_from_file(file_name, bytes)
+    let courses = birdseye_core::import::courses_from_file(file_name, bytes)
         .map_err(|e| JsError::new(&e.to_string()))?;
     Ok(serde_json::to_string(&courses)?)
 }
@@ -124,13 +124,13 @@ impl Network {
             graph.close_courses(&courses);
         }
         let options = Options { beam: options.beam, trace: options.trace };
-        let itinerary = birdeye_plan::solve_with(&event, &graph, options, progress)
+        let itinerary = birdseye_plan::solve_with(&event, &graph, options, progress)
             .map_err(|e| e.to_string())?;
         serde_json::to_string(&itinerary).map_err(|e| e.to_string())
     }
 }
 
-fn samples_along(polyline: &birdeye_core::geom::Polyline) -> Vec<Point> {
+fn samples_along(polyline: &birdseye_core::geom::Polyline) -> Vec<Point> {
     let steps = (polyline.length() / DENSIFY_SPACING_M).ceil().max(1.0) as usize;
     (0..=steps).map(|i| polyline.point_at(i as f64 * DENSIFY_SPACING_M)).collect()
 }
@@ -154,7 +154,7 @@ fn default_beam() -> usize {
 mod tests {
     #[test]
     fn ping_format() {
-        assert_eq!(super::ping("x"), format!("birdeye {}: x", birdeye_core::VERSION));
+        assert_eq!(super::ping("x"), format!("birdseye {}: x", birdseye_core::VERSION));
     }
 
     #[test]

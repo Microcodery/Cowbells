@@ -222,7 +222,7 @@ function results(itinerary, event, ui) {
       return `<li data-act="flyTo" data-stop="${i}">
       <b>${label}</b> ${when}
       <ul>${stop.seen.map((s) => `<li>${esc(name(s.racer_id))} <span class="muted">${s.kind} ~${state.clock(s.expected)}</span></li>`).join("")}</ul>
-      ${itinerary.legs[i] ? `<p class="muted">→ ${Math.round(itinerary.legs[i].seconds / 60)} min</p>` : ""}
+      ${itinerary.legs[i] ? `<p class="muted">→ ${Math.round(itinerary.legs[i].seconds / 60)} min · ${state.distanceLabel(state.pathLength(itinerary.legs[i].path), ui.unit, 1)}</p>` : ""}
     </li>`;
     })
     .join("");
