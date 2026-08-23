@@ -6,8 +6,11 @@ default: test
 wasm profile="--dev":
     wasm-pack build crates/wasm --target web {{profile}}
 
-# One-time: web deps and a headless browser. CI passes "--with-deps".
+# One-time: wasm target, wasm-pack, web deps, and a headless browser. CI passes "--with-deps".
+# Without rustup, install your distro's wasm32 std package (e.g. libstd-rust-dev-wasm32).
 setup browser_flags="":
+    if command -v rustup >/dev/null; then rustup target add wasm32-unknown-unknown; fi
+    command -v wasm-pack >/dev/null || cargo install wasm-pack --locked
     npm --prefix web ci
     npm --prefix web exec playwright install {{browser_flags}} chromium
 

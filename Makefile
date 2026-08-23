@@ -2,6 +2,8 @@
 .PHONY: setup wasm lint test build serve dev
 
 setup:
+	if command -v rustup >/dev/null; then rustup target add wasm32-unknown-unknown; fi
+	command -v wasm-pack >/dev/null || cargo install wasm-pack --locked
 	npm --prefix web ci
 	npm --prefix web exec playwright install $(BROWSER_FLAGS) chromium
 

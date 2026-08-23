@@ -51,11 +51,15 @@ mode, line-of-sight, elevation. See [afx/SPEC.md](afx/SPEC.md).
 
 ## Development
 
-Requires Rust stable with the `wasm32-unknown-unknown` target, `wasm-pack`,
-and Node 22. The `Makefile` and `justfile` define the same targets; use
-whichever you have.
+Requires Rust ≥ 1.85 with the `wasm32-unknown-unknown` standard library,
+Node 22, and `make` or `just` (both define the same targets). With `rustup`,
+`setup` adds the wasm target itself; with a distro toolchain install its
+wasm32 package (Arch `rust-wasm`, Debian/Ubuntu `libstd-rust-dev-wasm32`,
+Fedora `rust-std-static-wasm32-unknown-unknown`). `setup` also installs
+`wasm-pack` (unless your distro's package is present), web dependencies, and
+a headless browser for tests.
 
-    make setup   # one-time: install web deps and a headless browser
+    make setup   # one-time: wasm target, wasm-pack, web deps, headless browser
     make test    # lint, wasm build, cargo test, web tests
     make build   # release wasm + vite build into web/dist
     make serve   # build, then serve web/dist locally
