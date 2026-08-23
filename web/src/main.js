@@ -16,6 +16,7 @@ const ui = { tool: null, itinerary: null, network: null, osm: null, status: "Dra
 let event = loadSaved() ?? state.newEvent(DEFAULT_CENTER);
 const map = createMap("map", event.origin, onMapClick);
 map.on("layers-ready", draw);
+window.birdeye = { map, event: () => event };
 
 let autosave;
 function draw() {

@@ -5,6 +5,7 @@ const wasmPkg = fileURLToPath(new URL("../crates/wasm/pkg/birdeye_wasm.js", impo
 
 export default defineConfig({
   base: "./",
+  // Our worker and MapLibre's are ES modules.
   worker: { format: "es" },
   resolve: { alias: { "birdeye-wasm": wasmPkg } },
   server: { fs: { allow: [".."] } },
@@ -12,7 +13,7 @@ export default defineConfig({
     browser: {
       enabled: true,
       provider: "playwright",
-      instances: [{ browser: "chromium" }],
+      instances: [{ browser: "chromium", launch: { channel: "chromium" } }],
       headless: true,
       screenshotFailures: false,
     },

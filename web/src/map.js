@@ -1,7 +1,11 @@
 // MapLibre setup, themed styles, and the overlay layers drawn from state.
 
-import { Map as MapLibre, NavigationControl } from "maplibre-gl";
+import { Map as MapLibre, NavigationControl, setWorkerUrl } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
+// MapLibre resolves its tile worker with a dynamic URL Vite cannot bundle; hand it a built one.
+import workerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url";
+
+setWorkerUrl(workerUrl);
 
 const STYLES = {
   light: "https://tiles.openfreemap.org/styles/positron",
