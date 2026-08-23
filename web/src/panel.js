@@ -15,14 +15,6 @@ export function renderPanel(root, event, ui, actions) {
   const scroll = root.scrollTop;
   const focused = root.contains(document.activeElement) ? selectorFor(document.activeElement) : null;
   root.innerHTML = `
-    <header>
-      <h1>birdeye</h1>
-      <button data-act="plan" class="plan ${event.courses.length && event.racers.length ? "ready" : "missing"}" ${ui.busy ? "disabled" : ""} title="${event.courses.length ? (event.racers.length ? "Plan where to stand" : "Add a racer first") : "Add a course first"}">Plan</button>
-      <span class="row">
-        <button data-act="theme" title="Light or dark">◐</button>
-        <button data-act="closePanel" class="phone-only" title="Back to the map">✕</button>
-      </span>
-    </header>
     <section>
       <div class="row">
         <select data-act="example" ${ui.busy ? "disabled" : ""}>
@@ -52,7 +44,25 @@ export function renderPanel(root, event, ui, actions) {
   }
   root.scrollTop = scroll;
   if (focused) root.querySelector(focused)?.focus({ preventScroll: true });
+  bindActions(root, actions);
+}
 
+/** The bar that stays put: name, the Plan button, theme, and on phones the panel toggle. */
+export function renderHeader(root, event, ui, actions) {
+  const ready = event.courses.length && event.racers.length;
+  const why = event.courses.length ? (event.racers.length ? "Plan where to stand" : "Add a racer first") : "Add a course first";
+  root.innerHTML = `
+    <h1>birdseye</h1>
+    <button data-act="plan" class="plan ${ready ? "ready" : "missing"}" ${ui.busy ? "disabled" : ""} title="${why}">Plan</button>
+    <span class="row">
+      <button data-act="theme" title="Light or dark">◐</button>
+      <button data-act="togglePanel" class="phone-only" title="Options">☰</button>
+    </span>`;
+  bindActions(root, actions);
+}
+
+/** Clicks and changes inside `root` dispatch to `actions` by their `data-act` / `data-field`. */
+function bindActions(root, actions) {
   root.onclick = (e) => {
     const target = e.target.closest("[data-act]");
     // File inputs and selects act on change, not on the click that opens them.

@@ -1,4 +1,4 @@
-# birdeye
+# birdseye
 
 Spectator planning for races (running, cycling, triathlon, and similar).
 

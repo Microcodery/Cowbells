@@ -4,7 +4,7 @@ import { itineraryToGpx } from "./gpx.js";
 import { createMap, currentTheme, flyTo, mapCenter, render as renderMap, replayCanvas, revealItinerary, setHover, setTheme } from "./map.js";
 import { liveReplay } from "./replay.js";
 import { fetchOsm } from "./overpass.js";
-import { esc, renderPanel } from "./panel.js";
+import { esc, renderHeader, renderPanel } from "./panel.js";
 import * as state from "./state.js";
 
 const STORAGE_KEY = "birdeye.event";
@@ -30,9 +30,10 @@ let planGeneration = 0;
 
 let event = loadSaved() ?? state.newEvent(DEFAULT_CENTER);
 const map = createMap("map", event.origin, onMapClick, onMapHover);
+const top = document.getElementById("top");
 const hoverTip = document.getElementById("hover");
 const mapStatus = document.getElementById("mapstatus");
-document.getElementById("menu").onclick = () => document.body.classList.toggle("panel-open");
+const scan = document.getElementById("scan");
 /** On phones the panel covers the map; planning closes it so the progress is visible. */
 const closePanelOnPhones = () => matchMedia("(max-width: 700px)").matches && document.body.classList.remove("panel-open");
 map.on("layers-ready", draw);
@@ -40,6 +41,7 @@ window.birdeye = { map, event: () => event };
 
 let autosave;
 function draw() {
+  renderHeader(top, event, ui, actions);
   renderPanel(panel, event, ui, actions);
   mapStatus.textContent = ui.status;
   mapStatus.hidden = !ui.status;
@@ -268,12 +270,14 @@ const actions = {
       ui.status = await buildNetwork();
     });
   },
-  closePanel() {
-    document.body.classList.remove("panel-open");
+  togglePanel() {
+    document.body.classList.toggle("panel-open");
   },
   async plan() {
     let planned = false;
     closePanelOnPhones();
+    // Nothing to show until the engine reports; a scan across the map says it is working.
+    scan.hidden = false;
     await run("Planning…", async () => {
       if (!event.courses.length) throw new Error("draw or import a course first");
       if (!event.racers.length) throw new Error("add a racer first");
@@ -287,7 +291,11 @@ const actions = {
       if (problems.length) throw new Error(problems.join("; "));
       // The previous itinerary fades out while the engine's progress plays, and the new one fades in after.
       revealItinerary(map, false);
-      const live = liveReplay(replayCanvas(map), event.spectator.sighting_radius_m, narrate);
+      const reported = (text) => {
+        scan.hidden = true;
+        narrate(text);
+      };
+      const live = liveReplay(replayCanvas(map), event.spectator.sighting_radius_m, reported);
       const itinerary = await engine.call("plan", { event, options: { beam: ui.beam, trace: true } }, live.push);
       await live.finish();
       ui.itinerary = itinerary;
@@ -297,6 +305,7 @@ const actions = {
       draw();
       requestAnimationFrame(() => revealItinerary(map, true));
     });
+    scan.hidden = true;
     if (planned) exploreAlternatives(++planGeneration).catch((err) => console.error("alternatives", err));
   },
   async useAlternative({ alt }) {

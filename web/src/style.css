@@ -42,10 +42,27 @@ body {
   color: var(--fg);
   display: grid;
   grid-template-columns: 360px 1fr;
+  grid-template-rows: auto 1fr;
+  grid-template-areas:
+    "top map"
+    "panel map";
   height: 100vh;
 }
 
+#top {
+  grid-area: top;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  border-right: 1px solid var(--border);
+}
+
 #panel {
+  grid-area: panel;
   overflow-y: auto;
   background: var(--panel);
   border-right: 1px solid var(--border);
@@ -53,8 +70,41 @@ body {
 }
 
 #map {
+  grid-area: map;
   height: 100vh;
   position: relative;
+}
+
+/* A band sweeping the map while the engine has nothing to show yet. */
+#scan {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+#scan[hidden] {
+  display: none;
+}
+
+#scan::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 18%;
+  background: linear-gradient(90deg, transparent, rgba(37, 99, 235, 0.28), transparent);
+  animation: scan 1.4s linear infinite;
+}
+
+@keyframes scan {
+  from {
+    left: -20%;
+  }
+  to {
+    left: 100%;
+  }
 }
 
 #hover {
@@ -85,23 +135,12 @@ body {
   cursor: pointer;
 }
 
-header {
-  position: sticky;
-  top: 0;
-  background: var(--panel);
-  padding: 12px 0 8px;
-  border-bottom: 1px solid var(--border);
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
 h1 {
   font-size: 18px;
   margin: 0;
 }
 
-header .row {
+#top .row {
   margin: 0;
 }
 
@@ -280,7 +319,6 @@ details[data-section="settings"] label > select {
   color: var(--warn);
 }
 
-#menu,
 #mapstatus {
   display: none;
   position: absolute;
@@ -291,18 +329,36 @@ details[data-section="settings"] label > select {
   display: none;
 }
 
-/* Phones: the map fills the screen; the panel opens over it from the menu button. */
+/* Phones: the bar stays fixed on top, the map fills the screen, the panel opens over the map. */
 @media (max-width: 700px) {
+  :root {
+    --top-height: 52px;
+  }
   body {
     display: block;
     height: 100dvh;
   }
+  #top {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: var(--top-height);
+    z-index: 12;
+    border-right: 0;
+  }
   #map {
     height: 100dvh;
   }
+  #map .maplibregl-ctrl-top-right {
+    top: var(--top-height);
+  }
   #panel {
     position: fixed;
-    inset: 0;
+    top: var(--top-height);
+    left: 0;
+    right: 0;
+    bottom: 0;
     z-index: 10;
     border-right: 0;
     display: none;
@@ -310,19 +366,11 @@ details[data-section="settings"] label > select {
   body.panel-open #panel {
     display: block;
   }
-  #menu {
-    display: block;
-    top: 10px;
-    left: 10px;
-    font-size: 20px;
-    line-height: 1;
-    padding: 6px 10px;
-  }
   #mapstatus {
     display: block;
-    left: 56px;
+    left: 10px;
     right: 56px;
-    top: 12px;
+    top: calc(var(--top-height) + 8px);
     background: var(--panel);
     border: 1px solid var(--border);
     border-radius: 6px;
@@ -334,10 +382,6 @@ details[data-section="settings"] label > select {
   }
   .phone-only {
     display: inline-block;
-  }
-  header {
-    flex-wrap: wrap;
-    gap: 6px;
   }
   input,
   select,
