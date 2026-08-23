@@ -1,19 +1,29 @@
 import { describe, expect, it } from "vitest";
 
-function ask(worker, message) {
-  return new Promise((resolve, reject) => {
-    worker.onmessage = (e) => resolve(e.data);
-    worker.onerror = (e) => reject(e);
-    worker.postMessage(message);
-  });
-}
+import { createEngine } from "../src/engine.js";
 
-describe("worker", () => {
+describe("engine", () => {
+  const engine = createEngine();
+
   it("round-trips a ping through the WASM engine", async () => {
-    const worker = new Worker(new URL("../src/worker.js", import.meta.url), { type: "module" });
-    const reply = await ask(worker, { type: "ping", msg: "hello" });
-    expect(reply.type, reply.message).toBe("pong");
-    expect(reply.msg).toMatch(/^birdeye \d+\.\d+\.\d+: hello$/);
-    worker.terminate();
+    const reply = await engine.call("ping", { msg: "hello" });
+    expect(reply).toMatch(/^birdeye \d+\.\d+\.\d+: hello$/);
+  });
+
+  it("validates an event and reports problems", async () => {
+    const event = {
+      name: "e",
+      origin: { lat: 0, lon: 0 },
+      courses: [],
+      racers: [{ id: "r", name: "r", course_id: "missing", pace_profile: [] }],
+      spectator: { earliest: 0, mode: "walk" },
+    };
+    const problems = await engine.call("validate", { event });
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toContain("unknown course");
+  });
+
+  it("rejects unknown message types", async () => {
+    await expect(engine.call("nope")).rejects.toThrow("unknown message type");
   });
 });

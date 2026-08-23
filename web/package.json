@@ -13,5 +13,8 @@
     "playwright": "^1",
     "vite": "^6",
     "vitest": "^3"
+  },
+  "dependencies": {
+    "maplibre-gl": "^6.5.0"
   }
 }
