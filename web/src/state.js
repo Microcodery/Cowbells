@@ -276,8 +276,10 @@ export function clock(epoch) {
   return new Date(epoch * 1000).toTimeString().slice(0, 5);
 }
 
+/** `epoch` moved to the clock time `hhmm` on its day; unchanged when the input is blank or malformed. */
 export function withClock(epoch, hhmm) {
   const [h, m] = hhmm.split(":").map(Number);
+  if (!Number.isInteger(h) || !Number.isInteger(m)) return epoch;
   const d = new Date(epoch * 1000);
   d.setHours(h, m, 0, 0);
   return Math.floor(d.getTime() / 1000);

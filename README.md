@@ -50,9 +50,9 @@ Runs entirely in the browser as a static page: no account, no backend.
   included — a downtown loop with two racers; a 5K, 10K, and half marathon
   sharing start and finish with five racers; and an 8.6 km out-and-back whose
   outbound and return legs run three blocks apart, with six racers; and the
-  Denver Colfax Marathon and Half Marathon from the official course files,
-  each with two racers (the full marathon fetches its map data on Plan; the
-  others bundle theirs). Each is
+  Denver Colfax Marathon and Half Marathon together, from the official course
+  files, with Cat running the half and Cat's Friend the full (this one fetches
+  its map data when first planned; the others bundle theirs). Each is
   also a regression test (`crates/wasm/tests/examples.rs`) pinning the levels
   its plan must reach.
 

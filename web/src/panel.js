@@ -10,6 +10,11 @@ const TRAVEL = ["walk", "bike", "drive"];
  * (which tool is active, the latest itinerary, status text).
  */
 export function renderPanel(root, event, ui, actions) {
+  // A time input fires change after each segment typed; rebuilding it mid-entry would eat the rest, so wait for blur.
+  if (root.editingTime) {
+    root.pendingRender = () => renderPanel(root, event, ui, actions);
+    return;
+  }
   // Rebuilding the markup must not move the user: keep open sections open and the scroll where it was.
   const folds = new Map([...root.querySelectorAll("details[data-section]")].map((d) => [d.dataset.section, d.open]));
   const scroll = root.scrollTop;
@@ -27,8 +32,7 @@ export function renderPanel(root, event, ui, actions) {
           <option value="downtown-loop">Downtown loop</option>
           <option value="three-distances">5K · 10K · half marathon</option>
           <option value="hawthorne-belmont">Out-and-back, six racers</option>
-          <option value="colfax-half-marathon">Colfax Half Marathon</option>
-          <option value="colfax-marathon">Colfax Marathon</option>
+          <option value="colfax">Colfax Marathon &amp; Half</option>
         </select>
       </div>
       <div class="row">
@@ -86,6 +90,19 @@ function bindActions(root, actions) {
     if (act) actions[act](e.target.dataset, e.target);
     else if (field) actions.edit(e.target.dataset, e.target);
   };
+  if (root.focusTracked) return;
+  root.focusTracked = true;
+  // Chromium reports no active element between a time input's segments, so focus is tracked by its events.
+  root.addEventListener("focusin", (e) => {
+    root.editingTime = e.target.type === "time";
+  });
+  root.addEventListener("focusout", (e) => {
+    if (e.target.type !== "time") return;
+    root.editingTime = false;
+    const render = root.pendingRender;
+    root.pendingRender = null;
+    render?.();
+  });
 }
 
 function coursesSection(event, ui) {

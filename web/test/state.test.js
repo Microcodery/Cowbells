@@ -1,10 +1,19 @@
 import { describe, expect, it } from "vitest";
 
 import { itineraryToGpx } from "../src/gpx.js";
-import { newEvent, rebase, stopLabel } from "../src/state.js";
+import { newEvent, rebase, stopLabel, withClock } from "../src/state.js";
 
 const stop = (seen) => ({ location: { lat: 1, lon: 2 }, arrive: 100, depart: 200, seen });
 const sighting = (racer_id, kind, expected) => ({ racer_id, kind, expected, open: 0, close: 0 });
+
+describe("withClock", () => {
+  it("keeps the time when the input is blank, so the event never carries a NaN timestamp", () => {
+    const epoch = 1_700_000_000;
+    expect(withClock(epoch, "")).toBe(epoch);
+    expect(withClock(epoch, "xx:yy")).toBe(epoch);
+    expect(withClock(epoch, "07:30")).not.toBe(epoch);
+  });
+});
 
 describe("rebase", () => {
   it("keeps staggered starts and the spectator's lead intact", () => {
