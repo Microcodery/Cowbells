@@ -1,5 +1,6 @@
 import "./style.css";
 import { createEngine } from "./engine.js";
+import { itineraryToGpx } from "./gpx.js";
 import { createMap, currentTheme, flyTo, mapCenter, render as renderMap, setTheme } from "./map.js";
 import { fetchOsm } from "./overpass.js";
 import { renderPanel } from "./panel.js";
@@ -21,7 +22,7 @@ window.birdeye = { map, event: () => event };
 let autosave;
 function draw() {
   renderPanel(panel, event, ui, actions);
-  renderMap(map, event, ui.itinerary);
+  renderMap(map, event, ui.itinerary, ui.tool?.courseIndex ?? null);
   clearTimeout(autosave);
   autosave = setTimeout(() => localStorage.setItem(STORAGE_KEY, JSON.stringify(event)), AUTOSAVE_DELAY_MS);
 }
@@ -148,10 +149,10 @@ const actions = {
     flyTo(map, ui.itinerary.stops[stop].location);
   },
   save() {
-    const blob = new Blob([JSON.stringify({ event, osm: ui.osm }, null, 1)], { type: "application/json" });
-    const a = Object.assign(document.createElement("a"), { href: URL.createObjectURL(blob), download: `${event.name}.json` });
-    a.click();
-    URL.revokeObjectURL(a.href);
+    download(`${event.name}.bird`, JSON.stringify({ event, osm: ui.osm }, null, 1), "application/json");
+  },
+  exportGpx() {
+    download(`${event.name} spectator.gpx`, itineraryToGpx(ui.itinerary, event), "application/gpx+xml");
   },
   async load(_, input) {
     const text = await input.files[0]?.text();
@@ -159,13 +160,28 @@ const actions = {
     await run("Loading…", async () => {
       const saved = JSON.parse(text);
       const loaded = saved.event ?? saved;
-      if (!state.looksLikeEvent(loaded)) throw new Error("not a birdeye event file");
+      if (!state.looksLikeEvent(loaded)) throw new Error("not a .bird event file");
       event = loaded;
       ui.osm = saved.osm ?? null;
       ui.network = null;
       ui.itinerary = null;
       flyTo(map, event.origin);
       ui.status = ui.osm ? await buildNetwork() : "Loaded. Fetch map data to plan.";
+    });
+  },
+  async example(_, select) {
+    const name = select.value;
+    if (!name) return;
+    await run("Loading example…", async () => {
+      const response = await fetch(`${import.meta.env.BASE_URL}examples/${name}.bird`);
+      if (!response.ok) throw new Error(`example ${name} not found`);
+      event = await response.json();
+      state.rebase(event, state.todayAt("09:00"));
+      ui.osm = null;
+      ui.network = null;
+      ui.itinerary = null;
+      flyTo(map, event.origin);
+      ui.status = "Example loaded. Fetch map data, then plan.";
     });
   },
   async gpx(_, input) {
@@ -233,6 +249,12 @@ const actions = {
     mutate(() => edits[field]?.());
   },
 };
+
+function download(filename, text, type) {
+  const a = Object.assign(document.createElement("a"), { href: URL.createObjectURL(new Blob([text], { type })), download: filename });
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
 
 async function buildNetwork() {
   ui.network = await engine.call("network", { osm: ui.osm, origin: event.origin, mode: event.spectator.mode });

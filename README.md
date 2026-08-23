@@ -26,7 +26,11 @@ Runs entirely in the browser as a static page: no account, no backend.
   that best serves the priority tiers (everyone once, everyone's finish, extras).
 - **Results:** numbered stops on the map with arrive/leave times and who you'll
   see; unseen racers and unreachable areas called out.
-- **Sharing:** save/load as JSON.
+- **Files:** save/load the whole event as a `.bird` file; export the
+  spectator's itinerary as GPX (a track plus a waypoint per stop).
+- **Examples:** two sample `.bird` events in the header dropdown — a downtown
+  loop with two racers, and a three-distance event (short/medium/long sharing
+  start and finish) with four racers.
 
 Engine in Rust compiled to WebAssembly; map UI in plain JavaScript with
 MapLibre GL.
@@ -59,9 +63,10 @@ whichever you have.
 
 ## Status
 
-Working prototype. Draw courses (or import GPX), split segments, add racers
-with pace profiles, set the spectator's start, fetch OpenStreetMap data for
-the area, and plan. Expect rough edges; see `afx/PLAN.md` for what's next.
+Working prototype. Start from an example, draw courses, or import GPX; then
+split segments, add racers with pace profiles, set the spectator's start,
+fetch OpenStreetMap data for the area, and plan. Expect rough edges; see
+`afx/PLAN.md` for what's next.
 
 ## License
 

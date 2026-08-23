@@ -157,6 +157,31 @@ function haversineM(a, b) {
   return 2 * 6371008.8 * Math.asin(Math.sqrt(h));
 }
 
+/** Shift every timestamp so the earliest course start lands on `startAt`; examples ship with relative times. */
+export function rebase(event, startAt) {
+  if (event.courses.length === 0) return;
+  const delta = startAt - Math.min(...event.courses.map((c) => c.start_time));
+  for (const course of event.courses) course.start_time += delta;
+  const s = event.spectator;
+  s.earliest += delta;
+  if (s.latest != null) s.latest += delta;
+  if (s.end) s.end.latest += delta;
+  for (const r of s.required_regions) if (r.latest != null) r.latest += delta;
+}
+
+/** "Start" for an anchored start stop, otherwise the stop's 1-based number. */
+export function stopLabel(event, index) {
+  if (!event.spectator.start) return index + 1;
+  return index === 0 ? "Start" : index;
+}
+
+/** A finish counts as a pass too; list it once, as the finish. */
+export function visibleSightings(stop) {
+  const key = (s) => `${s.racer_id}@${s.expected}`;
+  const finishKeys = new Set(stop.seen.filter((s) => s.kind === "finish").map(key));
+  return stop.seen.filter((s) => s.kind === "finish" || !finishKeys.has(key(s)));
+}
+
 export function todayAt(hhmm) {
   const [h, m] = hhmm.split(":").map(Number);
   const d = new Date();

@@ -14,9 +14,14 @@ export function renderPanel(root, event, ui, actions) {
     <header>
       <h1>birdeye</h1>
       <div class="row">
-        <button data-act="save">Save</button>
-        <label class="button">Load<input type="file" accept=".json" data-act="load" hidden ${ui.busy ? "disabled" : ""}></label>
-        <label class="button">GPX<input type="file" accept=".gpx" data-act="gpx" hidden ${ui.busy ? "disabled" : ""}></label>
+        <select data-act="example" ${ui.busy ? "disabled" : ""}>
+          <option value="">Examples…</option>
+          <option value="downtown-loop">Downtown loop</option>
+          <option value="hawthorne-3-distance">Three distances</option>
+        </select>
+        <button data-act="save" title="Save event as .bird">Save</button>
+        <label class="button" title="Load a .bird event">Load<input type="file" accept=".bird,.json" data-act="load" hidden ${ui.busy ? "disabled" : ""}></label>
+        <label class="button" title="Import courses from GPX">GPX<input type="file" accept=".gpx" data-act="gpx" hidden ${ui.busy ? "disabled" : ""}></label>
         <button data-act="theme">◐</button>
       </div>
     </header>
@@ -38,8 +43,8 @@ export function renderPanel(root, event, ui, actions) {
 
   root.onclick = (e) => {
     const target = e.target.closest("[data-act]");
-    // File inputs act on change, not on the click that opens the picker.
-    if (target && target.tagName !== "INPUT") actions[target.dataset.act](target.dataset);
+    // File inputs and selects act on change, not on the click that opens them.
+    if (target && !["INPUT", "SELECT"].includes(target.tagName)) actions[target.dataset.act](target.dataset);
   };
   root.onchange = (e) => {
     const { act, field } = e.target.dataset;
@@ -161,23 +166,22 @@ function spectatorSection(event, ui) {
 
 function results(itinerary, event) {
   const name = (id) => event.racers.find((r) => r.id === id)?.name ?? id;
-  const anchored = Boolean(event.spectator.start);
   const stops = itinerary.stops
     .map((stop, i) => {
-      const isStart = anchored && i === 0;
-      const label = isStart ? "Start" : anchored ? i : i + 1;
-      const when = isStart ? state.clock(stop.depart) : `${state.clock(stop.arrive)}–${state.clock(stop.depart)}`;
+      const label = state.stopLabel(event, i);
+      const when = label === "Start" ? state.clock(stop.depart) : `${state.clock(stop.arrive)}–${state.clock(stop.depart)}`;
       return `<li data-act="flyTo" data-stop="${i}">
       <b>${label}</b> ${when}
-      <ul>${stop.seen.map((s) => `<li>${esc(name(s.racer_id))} <span class="muted">${s.kind} ~${state.clock(s.expected)}</span></li>`).join("")}</ul>
+      <ul>${state.visibleSightings(stop).map((s) => `<li>${esc(name(s.racer_id))} <span class="muted">${s.kind} ~${state.clock(s.expected)}</span></li>`).join("")}</ul>
       ${itinerary.legs[i] ? `<p class="muted">→ ${Math.round(itinerary.legs[i].seconds / 60)} min</p>` : ""}
     </li>`;
     })
     .join("");
   const unseen = itinerary.unseen.length ? `<p class="warn">Never seen: ${itinerary.unseen.map(name).map(esc).join(", ")}</p>` : "";
   const unmet = itinerary.unmet_regions.length ? `<p class="warn">Could not visit area ${itinerary.unmet_regions.map((i) => i + 1).join(", ")}</p>` : "";
-  const sightings = itinerary.stops.reduce((n, s) => n + s.seen.length, 0);
-  return `<p>${sightings} sightings, score ${Math.round(itinerary.score)}</p><ol class="stops">${stops}</ol>${unseen}${unmet}`;
+  const sightings = itinerary.stops.reduce((n, s) => n + state.visibleSightings(s).length, 0);
+  return `<p>${sightings} sightings, score ${Math.round(itinerary.score)} <button data-act="exportGpx">Export GPX</button></p>
+    <ol class="stops">${stops}</ol>${unseen}${unmet}`;
 }
 
 const toolButton = (act, active, idle, working, extra = "") =>

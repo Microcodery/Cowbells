@@ -2,6 +2,7 @@
 
 import { Map as MapLibre, NavigationControl, setWorkerUrl } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
+import { stopLabel } from "./state.js";
 // MapLibre resolves its tile worker with a dynamic URL Vite cannot bundle; hand it a built one.
 import workerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url";
 
@@ -60,8 +61,8 @@ function addLayers(map) {
   map.fire("layers-ready");
 }
 
-/** Redraw every overlay from the event and the latest itinerary. */
-export function render(map, event, itinerary) {
+/** Redraw every overlay from the event and the latest itinerary; vertices only for the course being edited. */
+export function render(map, event, itinerary, editingCourse = null) {
   if (!map.getSource("courses")) return;
   const courses = [];
   const vertices = [];
@@ -69,7 +70,7 @@ export function render(map, event, itinerary) {
     const color = COURSE_COLORS[i % COURSE_COLORS.length];
     course.segments.forEach((segment) => {
       if (segment.points.length >= 2) courses.push(feature(lineOf(segment.points), { color }));
-      segment.points.forEach((p) => vertices.push(feature(pointOf(p), { color })));
+      if (i === editingCourse) segment.points.forEach((p) => vertices.push(feature(pointOf(p), { color })));
     });
   });
   map.getSource("courses").setData(collection(courses));
@@ -81,8 +82,10 @@ export function render(map, event, itinerary) {
   map.getSource("spectator").setData(collection(spectator));
   map.getSource("regions").setData(collection(event.spectator.required_regions.map((r) => feature(circleOf(r.center, r.radius_m)))));
 
-  const skip = event.spectator.start ? 1 : 0;
-  const stops = (itinerary?.stops ?? []).slice(skip).map((s, i) => feature(pointOf(s.location), { label: String(i + 1) }));
+  const stops = (itinerary?.stops ?? [])
+    .map((s, i) => ({ s, label: stopLabel(event, i) }))
+    .filter(({ label }) => label !== "Start")
+    .map(({ s, label }) => feature(pointOf(s.location), { label: String(label) }));
   const legs = (itinerary?.legs ?? []).filter((l) => l.path.length >= 2).map((l) => feature(lineOf(l.path)));
   map.getSource("stops").setData(collection(stops));
   map.getSource("legs").setData(collection(legs));
