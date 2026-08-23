@@ -25,6 +25,15 @@ const AUTOSAVE_DELAY_MS = 500;
 
 const engine = createEngine();
 const panel = document.getElementById("panel");
+// The ghost space left by a cleared plan goes once the user scrolls up.
+let lastScroll = 0;
+panel.addEventListener("scroll", () => {
+  if (ui.ghost && panel.scrollTop < lastScroll) {
+    ui.ghost = null;
+    panel.querySelector(".ghost")?.remove();
+  }
+  lastScroll = panel.scrollTop;
+});
 const ui = {
   tool: null,
   itinerary: null,
@@ -40,6 +49,8 @@ const ui = {
   tier: localStorage.getItem(TIER_KEY) in state.TIERS ? localStorage.getItem(TIER_KEY) : "free",
   banner: null,
   debug: loadDebug(),
+  // Height of the last plan's results, kept as empty space after it is cleared.
+  ghost: null,
   // `null` while alternatives are still being explored; then the ones that beat the plan.
   alternatives: null,
 };
@@ -113,13 +124,24 @@ function mutate(edit) {
  * refetching. Runs in the background (the worker serialises engine calls) so a change made
  * while something else is busy is never silently dropped.
  */
+const REBUILD_DELAY_MS = 400;
+let rebuildTimer = null;
+let networkBuild = null;
+
 function rebuildNetwork() {
   ui.network = null;
   if (!ui.osm) return;
   narrate("Rebuilding network…");
-  buildNetwork()
-    .then(narrate)
-    .catch((err) => narrate(`Network: ${err.message}`));
+  // Spinner clicks arrive in bursts; build once they stop, and let Plan wait for that build.
+  clearTimeout(rebuildTimer);
+  networkBuild = new Promise((resolve) => {
+    rebuildTimer = setTimeout(() => {
+      buildNetwork()
+        .then(narrate)
+        .catch((err) => narrate(`Network: ${err.message}`))
+        .finally(resolve);
+    }, REBUILD_DELAY_MS);
+  });
 }
 
 let mapDataTimer = null;
@@ -416,15 +438,23 @@ const actions = {
       clearTimeout(mapDataTimer);
       await ensureMapData();
       if (!ui.osm) throw new Error("map data could not be fetched; try again in a moment");
-      if (!ui.network) narrate(await buildNetwork());
-      const problems = await engine.call("validate", { event });
-      if (problems.length) throw new Error(problems.join("; "));
       // The previous itinerary fades out while the engine's progress plays, and the new one fades in after.
       revealItinerary(map, false);
-      const radius = event.spectator.sighting_radius_m;
-      const live = liveReplay(replayCanvas(map), radius, narrate, () => (scan.hidden = true), ui.debug);
-      const itinerary = await engine.call("plan", { event, options: { beam: ui.beam, trace: true } }, live.push);
-      await live.finish();
+      let itinerary;
+      // A settings change mid-plan makes the result stale: drop it and plan again with the new settings.
+      for (;;) {
+        const generation = planGeneration;
+        if (networkBuild) await networkBuild;
+        if (!ui.network) narrate(await buildNetwork());
+        const problems = await engine.call("validate", { event });
+        if (problems.length) throw new Error(problems.join("; "));
+        const radius = event.spectator.sighting_radius_m;
+        const live = liveReplay(replayCanvas(map), radius, narrate, () => (scan.hidden = true), ui.debug);
+        itinerary = await engine.call("plan", { event, options: { beam: ui.beam, trace: true } }, live.push);
+        await live.finish();
+        if (generation === planGeneration) break;
+        narrate("Settings changed — planning again…");
+      }
       ui.itinerary = itinerary;
       ui.alternatives = null;
       ui.status = `${state.planSummary(event, itinerary)}.`;
@@ -479,7 +509,7 @@ const actions = {
         rebuildNetwork();
       },
       speed: () => {
-        s.speed_mps = input.value ? number / ui.unit.speedPerMps : null;
+        s.speed_mps = number > 0 ? number / ui.unit.speedPerMps : null;
         rebuildNetwork();
       },
       radius: () => (s.sighting_radius_m = number),
@@ -534,8 +564,18 @@ function download(filename, text, type) {
   URL.revokeObjectURL(a.href);
 }
 
+/**
+ * Builds the network for the current settings. If the settings change while the engine is at
+ * it, the result is stale: it is dropped and the build starts over.
+ */
 async function buildNetwork() {
-  const { mode, speed_mps } = event.spectator;
-  ui.network = await engine.call("network", { osm: ui.osm, origin: event.origin, mode, speed: speed_mps });
-  return `Network: ${ui.network.nodes} nodes, ${ui.network.edges} edges.`;
+  for (;;) {
+    const generation = planGeneration;
+    const { mode, speed_mps } = event.spectator;
+    const network = await engine.call("network", { osm: ui.osm, origin: event.origin, mode, speed: speed_mps });
+    if (generation === planGeneration) {
+      ui.network = network;
+      return `Network: ${network.nodes} nodes, ${network.edges} edges.`;
+    }
+  }
 }

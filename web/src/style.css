@@ -352,30 +352,10 @@ details.section > summary h2 {
   margin: 12px 0 6px;
 }
 
-details[data-section="settings"] label,
-details[data-section="debug"] label {
-  display: flex;
-  justify-content: space-between;
-  gap: 8px;
-  margin: 6px 0;
-}
-
-details[data-section="settings"] label > input,
-details[data-section="settings"] label > select,
-details[data-section="debug"] label > span {
-  flex: 0 1 50%;
-  min-width: 0;
-}
-
-details[data-section="debug"] label > span {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-
-details[data-section="debug"] label > span > input {
-  flex: 1;
-  min-width: 0;
+.fields > label > input[type="checkbox"] {
+  flex: 0 0 auto;
+  width: 1.1em;
+  height: 1.1em;
 }
 
 .muted {

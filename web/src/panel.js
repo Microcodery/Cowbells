@@ -14,6 +14,10 @@ export function renderPanel(root, event, ui, actions) {
   const folds = new Map([...root.querySelectorAll("details[data-section]")].map((d) => [d.dataset.section, d.open]));
   const scroll = root.scrollTop;
   const focused = root.contains(document.activeElement) ? selectorFor(document.activeElement) : null;
+  // When the plan goes away, its space stays until the user scrolls up, so the panel does not snap.
+  const shown = root.querySelector("[data-results]");
+  if (shown && !ui.itinerary) ui.ghost = shown.offsetHeight;
+  if (ui.itinerary) ui.ghost = null;
   root.innerHTML = `
     ${ui.banner ? `<div class="banner">${ui.banner} <a href="${RELEASES}" target="_blank" rel="noopener">Run it yourself</a> <button data-act="dismissBanner" title="Dismiss">✕</button></div>` : ""}
     <section>
@@ -42,7 +46,7 @@ export function renderPanel(root, event, ui, actions) {
     <section>
       <h2>Results</h2>
       <p class="muted"><span data-status>${esc(ui.status)}</span></p>
-      ${ui.itinerary ? results(ui.itinerary, event, ui) : ""}
+      ${ui.itinerary ? `<div data-results>${results(ui.itinerary, event, ui)}</div>` : ui.ghost ? `<div class="ghost" style="height:${ui.ghost}px"></div>` : ""}
     </section>`;
   for (const details of root.querySelectorAll("details[data-section]")) {
     if (folds.has(details.dataset.section)) details.open = folds.get(details.dataset.section);
@@ -178,7 +182,7 @@ function spectatorSection(event, ui) {
       <label>from <input type="time" data-field="earliest" value="${state.clock(s.earliest)}"></label>
       <label>until <input type="time" data-field="latest" value="${s.latest ? state.clock(s.latest) : ""}"></label>
       <label>travel <select data-field="travel">${options(TRAVEL, s.mode)}</select></label>
-      ${s.mode === "drive" ? "" : `<label>speed <span><input type="number" data-field="speed" value="${s.speed_mps ? state.speedLabel(s.speed_mps, ui.unit) : ""}" placeholder="${state.speedLabel(state.DEFAULT_SPEED_MPS[s.mode], ui.unit)}" min="0.5" step="0.5" size="4" title="your pace on ordinary streets; blank for a typical one"> ${ui.unit.speed}</span></label>`}
+      ${s.mode === "drive" ? "" : `<label>speed <span><input type="number" data-field="speed" value="${state.speedLabel(s.speed_mps ?? state.DEFAULT_SPEED_MPS[s.mode], ui.unit)}" min="0.5" step="0.5" size="4" title="your pace on ordinary streets"> ${ui.unit.speed}</span></label>`}
     </div>
     <div class="row">
       ${toolButton("setEnd", tool("end"), s.end ? "Move end" : "Set end", "Click the map")}
@@ -206,7 +210,7 @@ function debugSection(ui) {
     .join("");
   return `<details class="section" data-section="debug">
       <summary><h2>Debug <button data-act="resetDebug" title="Back to the defaults">↺</button></h2></summary>
-      ${rows}
+      <div class="fields">${rows}</div>
   </details>`;
 }
 
@@ -214,15 +218,17 @@ function settingsSection(event, ui) {
   const s = event.spectator;
   return `<details class="section" data-section="settings">
       <summary><h2>Settings</h2></summary>
-      <label>sighting radius <input type="number" data-field="radius" value="${s.sighting_radius_m}" min="5" size="3"> m</label>
-      <label>skip first <input type="number" data-field="skipStart" value="${((s.skip_start_m ?? 1600) * ui.unit.perMetre).toFixed(1)}" min="0" step="0.1" size="4" title="the crowded start of each course is not worth a stop"> ${ui.unit.label}</label>
-      <label>safety buffer <input type="number" data-field="buffer" value="${s.safety_buffer_s / 60}" min="0" step="0.5" size="3"> min</label>
-      <label>min stop <input type="number" data-field="minStop" value="${s.min_stop_s / 60}" min="0" size="3"> min</label>
-      <label>viewpoint spacing <input type="number" data-field="spacing" value="${s.viewpoint_spacing_m ?? 120}" min="20" step="10" size="4" title="spots closer than this that see the same courses merge"> m</label>
-      <label><input type="checkbox" data-field="requireFinishes" ${s.objective.require_finishes ? "checked" : ""}> require every finish <span class="muted" title="Otherwise, in order: everyone seen the way they prefer, everyone's finish, each preferred sighting, each other sighting, repeats">?</span></label>
-      <label>breadth ↔ depth <input type="range" data-field="decay" value="${s.objective.repeat_decay}" min="0" max="0.9" step="0.1" title="How much each repeat sighting of a racer is worth relative to the previous one"></label>
-      <label><input type="checkbox" data-field="courseClosed" ${s.course_closed ? "checked" : ""}> course closed to crossing</label>
-      <label>search effort <select data-field="beam">${options(["16", "64", "256"], String(ui.beam))}</select></label>
+      <div class="fields">
+        <label>sighting radius <span><input type="number" data-field="radius" value="${s.sighting_radius_m}" min="5" size="3"> m</span></label>
+        <label>skip first <span><input type="number" data-field="skipStart" value="${((s.skip_start_m ?? 1600) * ui.unit.perMetre).toFixed(1)}" min="0" step="0.1" size="4" title="the crowded start of each course is not worth a stop"> ${ui.unit.label}</span></label>
+        <label>safety buffer <span><input type="number" data-field="buffer" value="${s.safety_buffer_s / 60}" min="0" step="0.5" size="3"> min</span></label>
+        <label>min stop <span><input type="number" data-field="minStop" value="${s.min_stop_s / 60}" min="0" size="3"> min</span></label>
+        <label>viewpoint spacing <span><input type="number" data-field="spacing" value="${s.viewpoint_spacing_m ?? 120}" min="20" step="10" size="4" title="spots closer than this that see the same courses merge"> m</span></label>
+        <label title="Otherwise, in order: everyone seen the way they prefer, everyone's finish, each preferred sighting, each other sighting, repeats">require every finish <input type="checkbox" data-field="requireFinishes" ${s.objective.require_finishes ? "checked" : ""}></label>
+        <label title="How much each repeat sighting of a racer is worth relative to the previous one">breadth ↔ depth <input type="range" data-field="decay" value="${s.objective.repeat_decay}" min="0" max="0.9" step="0.1"></label>
+        <label>course closed to crossing <input type="checkbox" data-field="courseClosed" ${s.course_closed ? "checked" : ""}></label>
+        <label>search effort <select data-field="beam">${options(["16", "64", "256"], String(ui.beam))}</select></label>
+      </div>
   </details>`;
 }
 

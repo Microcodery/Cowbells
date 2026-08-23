@@ -25,6 +25,26 @@ describe("tier locks", () => {
   });
 });
 
+describe("ghost space", () => {
+  it("keeps the cleared plan's height until told otherwise", () => {
+    const root = document.createElement("div");
+    document.body.append(root);
+    const event = newEvent({ lat: 45, lon: -122 });
+    const planned = { ...ui, itinerary: { stops: [], legs: [], unseen: [], unmet_regions: [], score: 0 }, alternatives: [] };
+    renderPanel(root, event, planned, {});
+    const height = root.querySelector("[data-results]").offsetHeight;
+    expect(height).toBeGreaterThan(0);
+    const cleared = { ...planned, itinerary: null };
+    renderPanel(root, event, cleared, {});
+    expect(cleared.ghost).toBe(height);
+    expect(root.querySelector(".ghost").style.height).toBe(`${height}px`);
+    cleared.ghost = null;
+    renderPanel(root, event, cleared, {});
+    expect(root.querySelector(".ghost")).toBeNull();
+    root.remove();
+  });
+});
+
 describe("renderPanel", () => {
   it("keeps each section's fold across re-renders", () => {
     const root = document.createElement("div");
