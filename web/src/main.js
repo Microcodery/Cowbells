@@ -11,6 +11,15 @@ import * as state from "./state.js";
 const STORAGE_KEY = "birdseye.event";
 const UNITS_KEY = "birdseye.units";
 const TIER_KEY = "birdseye.tier";
+const DEBUG_KEY = "birdseye.debug";
+
+function loadDebug() {
+  try {
+    return { ...state.debugDefaults(), ...JSON.parse(localStorage.getItem(DEBUG_KEY) ?? "{}") };
+  } catch {
+    return state.debugDefaults();
+  }
+}
 const DEFAULT_CENTER = { lat: 45.5231, lon: -122.6765 };
 const AUTOSAVE_DELAY_MS = 500;
 
@@ -30,6 +39,7 @@ const ui = {
   // A stand-in for a real account: what the tier allows is enforced, who pays is not.
   tier: localStorage.getItem(TIER_KEY) in state.TIERS ? localStorage.getItem(TIER_KEY) : "free",
   banner: null,
+  debug: loadDebug(),
   // `null` while alternatives are still being explored; then the ones that beat the plan.
   alternatives: null,
 };
@@ -63,7 +73,7 @@ async function restoreMapData() {
 /** Frame the longest course, with a margin, whenever a new event arrives. */
 function showCourses() {
   const longest = state.largestCourse(event);
-  if (longest) fitTo(map, longest.segments.flatMap((s) => s.points));
+  if (longest) fitTo(map, longest.segments.flatMap((s) => s.points), ui.debug.fitMargin / 100);
   else flyTo(map, event.origin);
 }
 window.birdseye = { map, event: () => event };
@@ -98,13 +108,20 @@ function mutate(edit) {
   scheduleMapData();
 }
 
-/** The network depends on mode and speed; rebuild it from the cached map data rather than refetching. */
+/**
+ * The network depends on mode and speed; rebuild it from the cached map data rather than
+ * refetching. Runs in the background (the worker serialises engine calls) so a change made
+ * while something else is busy is never silently dropped.
+ */
 function rebuildNetwork() {
   ui.network = null;
-  if (ui.osm) run("Rebuilding network…", async () => (ui.status = await buildNetwork()));
+  if (!ui.osm) return;
+  narrate("Rebuilding network…");
+  buildNetwork()
+    .then(narrate)
+    .catch((err) => narrate(`Network: ${err.message}`));
 }
 
-const MAP_DATA_DELAY_MS = 1500;
 let mapDataTimer = null;
 let mapDataFetch = null;
 
@@ -139,7 +156,7 @@ function ensureMapData() {
 /** Courses change point by point while drawing; fetch once the pen has been still for a moment. */
 function scheduleMapData() {
   clearTimeout(mapDataTimer);
-  mapDataTimer = setTimeout(() => ensureMapData(), MAP_DATA_DELAY_MS);
+  mapDataTimer = setTimeout(() => ensureMapData(), ui.debug.mapDataDelayMs);
 }
 
 function onMapClick(latlon) {
@@ -160,11 +177,9 @@ function onMapClick(latlon) {
   });
 }
 
-const HOVER_PX = 18;
-
 /** Hovering a course marks the spot and lists when each racer on it should pass. */
 function onMapHover(latlon, point, metresPerPixel) {
-  const hits = latlon ? state.nearestOnEachCourse(event, latlon).filter((h) => h.metres <= HOVER_PX * metresPerPixel) : [];
+  const hits = latlon ? state.nearestOnEachCourse(event, latlon).filter((h) => h.metres <= ui.debug.hoverPx * metresPerPixel) : [];
   if (!hits.length) {
     setHover(map, null);
     hoverTip.hidden = true;
@@ -237,6 +252,11 @@ const actions = {
   },
   dismissBanner() {
     ui.banner = null;
+    draw();
+  },
+  resetDebug() {
+    ui.debug = state.debugDefaults();
+    localStorage.removeItem(DEBUG_KEY);
     draw();
   },
   addCourse() {
@@ -402,7 +422,7 @@ const actions = {
       // The previous itinerary fades out while the engine's progress plays, and the new one fades in after.
       revealItinerary(map, false);
       const radius = event.spectator.sighting_radius_m;
-      const live = liveReplay(replayCanvas(map), radius, narrate, () => (scan.hidden = true));
+      const live = liveReplay(replayCanvas(map), radius, narrate, () => (scan.hidden = true), ui.debug);
       const itinerary = await engine.call("plan", { event, options: { beam: ui.beam, trace: true } }, live.push);
       await live.finish();
       ui.itinerary = itinerary;
@@ -425,11 +445,17 @@ const actions = {
       ui.status = `${state.planSummary(event, itinerary)}. ${await buildNetwork()}`;
     });
   },
-  edit({ field, ci, si, ri, ii, gi }, input) {
+  edit({ field, ci, si, ri, ii, gi, key }, input) {
+    const number = Number(input.value);
+    // Debug tunables touch feel, not the event: the plan stays valid.
+    if (field === "debug") {
+      ui.debug[key] = number;
+      localStorage.setItem(DEBUG_KEY, JSON.stringify(ui.debug));
+      return;
+    }
     const course = event.courses[ci];
     const racer = event.racers[ri];
     const s = event.spectator;
-    const number = Number(input.value);
     const edits = {
       name: () => (event.name = input.value),
       courseName: () => (course.name = input.value),

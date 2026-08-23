@@ -38,6 +38,7 @@ export function renderPanel(root, event, ui, actions) {
     ${racersSection(event, ui)}
     ${spectatorSection(event, ui)}
     ${settingsSection(event, ui)}
+    ${debugSection(ui)}
     <section>
       <h2>Results</h2>
       <p class="muted"><span data-status>${esc(ui.status)}</span></p>
@@ -195,6 +196,17 @@ function spectatorSection(event, ui) {
     </div>`,
       )
       .join("")}
+  </details>`;
+}
+
+/** Feel-only tunables, kept per browser so they can be tried without a code change. */
+function debugSection(ui) {
+  const rows = Object.entries(state.DEBUG_DEFAULTS)
+    .map(([k, d]) => `<label>${d.label} <span><input type="number" data-field="debug" data-key="${k}" value="${ui.debug[k]}" min="0" step="${d.unit === "%" ? 1 : 50}" size="5"> ${d.unit}</span></label>`)
+    .join("");
+  return `<details class="section" data-section="debug">
+      <summary><h2>Debug <button data-act="resetDebug" title="Back to the defaults">↺</button></h2></summary>
+      ${rows}
   </details>`;
 }
 

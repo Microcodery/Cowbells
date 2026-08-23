@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { renderPanel } from "../src/panel.js";
 import { UNITS, addCourse, newEvent } from "../src/state.js";
 
-const ui = { tool: null, itinerary: null, network: null, osm: null, status: "", busy: false, beam: 64, unit: UNITS.km, tier: "free" };
+const ui = { tool: null, itinerary: null, network: null, osm: null, status: "", busy: false, beam: 64, unit: UNITS.km, tier: "free", debug: { networkMs: 1000, candidatesMs: 1000, mergeMs: 1000, searchMs: 3000, fitMargin: 10, hoverPx: 18, mapDataDelayMs: 1500 } };
 
 describe("tier locks", () => {
   it("locks the add buttons once Free is used up and frees them on Plus", async () => {
