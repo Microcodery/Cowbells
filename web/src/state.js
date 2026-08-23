@@ -40,7 +40,7 @@ export function newEvent(center) {
       viewpoint_spacing_m: 120,
       course_closed: false,
       required_regions: [],
-      objective: { finishes: true, repeat_decay: 0.5 },
+      objective: { require_finishes: false, repeat_decay: 0.5 },
     },
   };
 }
@@ -99,6 +99,7 @@ export function addRacer(event, course) {
     start_offset_s: 0,
     pace_profile: seedProfile(course),
     priority: 1,
+    prefer: "en_route",
   };
   event.racers.push(racer);
   return racer;
@@ -273,13 +274,12 @@ export function planLevels(event, itinerary) {
 /** "Seen en route 2/3 · finishes 3/3 · 7 sightings". */
 export function planSummary(event, itinerary) {
   const { racers, seen, finished, sightings } = planLevels(event, itinerary);
-  const finishes = event.spectator.objective.finishes === false ? "" : ` · finishes ${finished}/${racers}`;
-  return `Seen en route ${seen}/${racers}${finishes} · ${sightings} sighting${sightings === 1 ? "" : "s"}`;
+  return `Seen en route ${seen}/${racers} · finishes ${finished}/${racers} · ${sightings} sighting${sightings === 1 ? "" : "s"}`;
 }
 
 /** Whether `a` beats `b` on the levels that matter most: completeness first, then counts. */
-export function betterPlan(a, b, finishes = true) {
-  const key = (l) => [l.seen === l.racers, finishes && l.finished === l.racers, finishes ? l.finished : 0, l.seen].map(Number);
+export function betterPlan(a, b) {
+  const key = (l) => [l.seen === l.racers, l.finished === l.racers, l.finished, l.seen].map(Number);
   const [ka, kb] = [key(a), key(b)];
   const i = ka.findIndex((v, i) => v !== kb[i]);
   return i >= 0 && ka[i] > kb[i];
@@ -315,13 +315,50 @@ export function looksLikeEvent(value) {
   return Boolean(value?.spectator && Array.isArray(value.courses) && Array.isArray(value.racers));
 }
 
+/** Metres along `course` to a point found by `nearestOnCourses`. */
+export function distanceAlong(course, hit) {
+  let along = 0;
+  course.segments.forEach((segment, si) => {
+    if (si < hit.segmentIndex) along += polylineLength(segment.points);
+    if (si === hit.segmentIndex) {
+      along += polylineLength(segment.points.slice(0, hit.pointIndex + 1));
+      along += haversineM(segment.points[hit.pointIndex], hit.latlon);
+    }
+  });
+  return along;
+}
+
+/** When each racer on `course` should pass `metres` along it, earliest to latest, with their spread. */
+export function arrivalsAt(event, course, metres) {
+  return event.racers
+    .filter((r) => r.course_id === course.id)
+    .map((racer) => {
+      let seconds = 0;
+      let spread = 0;
+      for (const p of racer.pace_profile) {
+        const covered = Math.max(0, Math.min(metres, p.end_m) - p.start_m);
+        seconds += (covered * p.seconds_per_km) / 1000;
+        spread += (covered * p.seconds_per_km * p.uncertainty) / 1000;
+      }
+      const expected = course.start_time + racer.start_offset_s + seconds;
+      return { racer, expected, early: expected - spread, late: expected + spread };
+    })
+    .sort((a, b) => a.expected - b.expected);
+}
+
 /** Nearest point on any course to `latlon`, in a flat approximation good enough for picking. */
 export function nearestOnCourses(event, latlon) {
+  return nearestOnEachCourse(event, latlon).reduce((best, hit) => (!best || hit.d2 < best.d2 ? hit : best), null);
+}
+
+/** The nearest point on every course to `latlon`, so a shared stretch reports all of them. */
+export function nearestOnEachCourse(event, latlon) {
   const kx = Math.cos((latlon.lat * Math.PI) / 180);
   const xy = (p) => ({ x: p.lon * kx, y: p.lat });
   const P = xy(latlon);
-  let best = null;
+  const hits = [];
   event.courses.forEach((course, courseIndex) => {
+    let best = null;
     course.segments.forEach((segment, segmentIndex) => {
       for (let i = 0; i + 1 < segment.points.length; i++) {
         const A = xy(segment.points[i]);
@@ -330,9 +367,12 @@ export function nearestOnCourses(event, latlon) {
         const t = Math.max(0, Math.min(1, ((P.x - A.x) * (B.x - A.x) + (P.y - A.y) * (B.y - A.y)) / len2));
         const Q = { x: A.x + t * (B.x - A.x), y: A.y + t * (B.y - A.y) };
         const d2 = (P.x - Q.x) ** 2 + (P.y - Q.y) ** 2;
-        if (!best || d2 < best.d2) best = { d2, courseIndex, segmentIndex, pointIndex: i, latlon: { lat: Q.y, lon: Q.x / kx } };
+        if (!best || d2 < best.d2) {
+          best = { d2, metres: Math.sqrt(d2) * 111195, courseIndex, segmentIndex, pointIndex: i, latlon: { lat: Q.y, lon: Q.x / kx } };
+        }
       }
     });
+    if (best) hits.push(best);
   });
-  return best;
+  return hits;
 }

@@ -31,9 +31,11 @@ Runs entirely in the browser as a static page: no account, no backend.
 - **Planning:** viewpoints are spots on the spectator network within sight of
   a stretch of course; each racer's visibility window there follows from their
   pace profile. An orienteering-with-time-windows solver picks the itinerary
-  with the best priorities, strictly in order: everyone seen en route, then
-  everyone's finish, then each finish, then each first sighting, then repeats
-  (with diminishing returns). Finishes can be switched off.
+  with the best priorities, strictly in order: everyone seen the way they
+  prefer (during the race or at the finish, per racer), then everyone's
+  finish, then each preferred sighting, then each other sighting, then repeats
+  (with diminishing returns). "Require every finish" makes a missed finish
+  outweigh everything else.
 - **Results:** numbered stops on the map with arrive/leave times and who you'll
   see; unseen racers and unreachable areas called out. Once a plan is shown,
   looser settings (moving faster, a shorter safety buffer, no minimum stop)
@@ -43,7 +45,9 @@ Runs entirely in the browser as a static page: no account, no backend.
 - **Examples:** sample `.bird` events in the header dropdown, map data
   included — a downtown loop with two racers; a 5K, 10K, and half marathon
   sharing start and finish with five racers; and an 8.6 km out-and-back whose
-  outbound and return legs run three blocks apart, with six racers.
+  outbound and return legs run three blocks apart, with six racers. Each is
+  also a regression test (`crates/wasm/tests/examples.rs`) pinning the levels
+  its plan must reach.
 
 Engine in Rust compiled to WebAssembly; map UI in plain JavaScript with
 MapLibre GL.

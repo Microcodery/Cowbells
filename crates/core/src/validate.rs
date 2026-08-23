@@ -187,6 +187,7 @@ mod tests {
                 start_offset_s: 0.0,
                 pace_profile,
                 priority: 1.0,
+                prefer: Prefer::EnRoute,
             }],
             spectator: SpectatorConfig {
                 start: None,

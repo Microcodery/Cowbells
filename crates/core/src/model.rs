@@ -79,6 +79,17 @@ pub struct Racer {
     pub pace_profile: Vec<PaceInterval>,
     #[serde(default = "default_priority")]
     pub priority: f64,
+    /// Which sighting of this racer the spectator cares about most.
+    #[serde(default)]
+    pub prefer: Prefer,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Prefer {
+    #[default]
+    EnRoute,
+    Finish,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -144,13 +155,14 @@ pub struct RequiredRegion {
     pub latest: Option<Timestamp>,
 }
 
-/// What a plan is worth, in strict priority: everyone seen en route, then everyone's finish,
-/// then each finish, then each racer's first en-route sighting, then repeats on a decaying curve.
+/// What a plan is worth, in strict priority: everyone seen the way they prefer, then everyone's
+/// finish, then each racer's preferred sighting, then their other kind, then repeats on a
+/// decaying curve.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Objective {
-    /// Whether finishes count at all.
-    #[serde(default = "default_true")]
-    pub finishes: bool,
+    /// Every finish must be seen: a plan missing one is charged more than any level earns.
+    #[serde(default)]
+    pub require_finishes: bool,
     /// Each repeat en-route sighting of a racer is worth this fraction of the previous one:
     /// 0 is pure breadth (see everybody once), 0.9 is nearly pure depth. Must stay below 1 so
     /// repeats can never add up to a first sighting.
@@ -159,7 +171,7 @@ pub struct Objective {
 
 impl Default for Objective {
     fn default() -> Self {
-        Self { finishes: true, repeat_decay: 0.5 }
+        Self { require_finishes: false, repeat_decay: 0.5 }
     }
 }
 
@@ -167,30 +179,37 @@ impl Default for Objective {
 /// levels below it could accumulate, so the scalar score ranks plans lexicographically.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Weights {
-    /// Bonus once every racer has been seen en route.
-    pub everyone_seen: f64,
-    /// Bonus once every racer's finish has been seen.
+    /// Bonus once every racer has had their preferred sighting.
+    pub everyone_preferred: f64,
+    /// Bonus once every racer's finish has been seen; zero when finishes are required instead.
     pub everyone_finished: f64,
-    /// Each racer's finish, scaled by priority.
-    pub finish: f64,
-    /// Each racer's first en-route sighting, scaled by priority.
-    pub first: f64,
+    /// A racer's first sighting of their preferred kind, scaled by priority.
+    pub preferred: f64,
+    /// A racer's first sighting of the other kind, scaled by priority.
+    pub other: f64,
     /// The `k`-th en-route sighting of a racer is worth `priority × repeat_decay^k` of this.
     pub repeat: f64,
-    /// One level's worth; anything that must beat every level costs a multiple of `everyone_seen`.
-    pub level: f64,
+    /// Charged per finish missed when finishes are required: more than every level earns.
+    pub missed_finish: f64,
 }
 
 impl Objective {
     pub fn weights(&self, racers: usize, max_priority: f64) -> Weights {
         let level = self.level_base(racers, max_priority);
-        // Without finishes the two finish levels vanish and everyone-seen sits right above firsts.
-        let (everyone_seen, everyone_finished, finish) = if self.finishes {
-            (level.powi(4), level.powi(3), level.powi(2))
-        } else {
-            (level.powi(2), 0.0, 0.0)
-        };
-        Weights { everyone_seen, everyone_finished, finish, first: level, repeat: 1.0, level }
+        let required = self.require_finishes;
+        Weights {
+            everyone_preferred: level.powi(4),
+            everyone_finished: if required { 0.0 } else { level.powi(3) },
+            preferred: level.powi(2),
+            other: level,
+            repeat: 1.0,
+            missed_finish: if required { level.powi(5) } else { 0.0 },
+        }
+    }
+
+    /// Charged per required region missed: more than every level and every finish could earn.
+    pub fn missed_region(&self, racers: usize, max_priority: f64) -> f64 {
+        self.level_base(racers, max_priority).powi(6)
     }
 
     /// Ten times the most a single level can be worth, so the scalar stays exact in f64 for
@@ -200,10 +219,6 @@ impl Objective {
         let most = (racers.max(1) as f64 * max_priority.max(1.0) * repeats).max(1.0);
         (10.0 * most).ceil()
     }
-}
-
-fn default_true() -> bool {
-    true
 }
 
 fn default_viewable() -> bool {
@@ -266,14 +281,14 @@ mod tests {
             "one racer, decay 0.5: at most 2 points per level, times ten"
         );
         let weights = objective.weights(1, 1.0);
-        assert_eq!(weights.everyone_seen, 160_000.0);
+        assert_eq!(weights.everyone_preferred, 160_000.0);
         assert_eq!(weights.everyone_finished, 8_000.0);
-        assert_eq!(weights.finish, 400.0);
-        assert_eq!(weights.first, 20.0);
-        assert_eq!(weights.repeat, 1.0);
-        let no_finishes = Objective { finishes: false, ..objective.clone() }.weights(1, 1.0);
-        assert_eq!((no_finishes.finish, no_finishes.everyone_finished), (0.0, 0.0));
-        assert_eq!(no_finishes.everyone_seen, 400.0);
+        assert_eq!(weights.preferred, 400.0);
+        assert_eq!(weights.other, 20.0);
+        assert_eq!((weights.repeat, weights.missed_finish), (1.0, 0.0));
+        let required = Objective { require_finishes: true, ..objective.clone() }.weights(1, 1.0);
+        assert_eq!((required.everyone_finished, required.missed_finish), (0.0, 3_200_000.0));
+        assert_eq!(objective.missed_region(1, 1.0), 64_000_000.0);
         assert_eq!(objective.level_base(30, 1.0), 600.0);
 
         let again: Event = serde_json::from_str(&serde_json::to_string(&event).unwrap()).unwrap();

@@ -1,10 +1,10 @@
 import "./style.css";
 import { createEngine } from "./engine.js";
 import { itineraryToGpx } from "./gpx.js";
-import { createMap, currentTheme, flyTo, mapCenter, render as renderMap, replayCanvas, revealItinerary, setTheme } from "./map.js";
+import { createMap, currentTheme, flyTo, mapCenter, render as renderMap, replayCanvas, revealItinerary, setHover, setTheme } from "./map.js";
 import { replay } from "./replay.js";
 import { fetchOsm } from "./overpass.js";
-import { renderPanel } from "./panel.js";
+import { esc, renderPanel } from "./panel.js";
 import * as state from "./state.js";
 
 const STORAGE_KEY = "birdeye.event";
@@ -31,7 +31,8 @@ const ui = {
 let planGeneration = 0;
 
 let event = loadSaved() ?? state.newEvent(DEFAULT_CENTER);
-const map = createMap("map", event.origin, onMapClick);
+const map = createMap("map", event.origin, onMapClick, onMapHover);
+const hoverTip = document.getElementById("hover");
 map.on("layers-ready", draw);
 window.birdeye = { map, event: () => event };
 
@@ -87,6 +88,32 @@ function onMapClick(latlon) {
     }
     if (tool.kind !== "draw") ui.tool = null;
   });
+}
+
+const HOVER_PX = 18;
+
+/** Hovering a course marks the spot and lists when each racer on it should pass. */
+function onMapHover(latlon, point, metresPerPixel) {
+  const hits = latlon ? state.nearestOnEachCourse(event, latlon).filter((h) => h.metres <= HOVER_PX * metresPerPixel) : [];
+  if (!hits.length) {
+    setHover(map, null);
+    hoverTip.hidden = true;
+    return;
+  }
+  const blocks = hits.map((hit) => {
+    const course = event.courses[hit.courseIndex];
+    const metres = state.distanceAlong(course, hit);
+    const rows = state.arrivalsAt(event, course, metres).map(
+      (a) => `<li><b>${esc(a.racer.name)}</b> ~${state.clock(a.expected)} <span class="muted">${state.clock(a.early)}–${state.clock(a.late)}</span></li>`,
+    );
+    return `<div>${esc(course.name)} · ${state.distanceLabel(metres, ui.unit, 1)}</div><ul>${rows.join("") || "<li class='muted'>no racers</li>"}</ul>`;
+  });
+  hoverTip.innerHTML = blocks.join("");
+  hoverTip.style.left = `${point.x + 14}px`;
+  hoverTip.style.top = `${point.y + 14}px`;
+  hoverTip.hidden = false;
+  const nearest = hits.reduce((a, b) => (b.d2 < a.d2 ? b : a));
+  setHover(map, nearest.latlon, nearest.courseIndex);
 }
 
 function toggleTool(kind, courseIndex) {
@@ -287,6 +314,7 @@ const actions = {
       racerCourse: () => state.assignCourse(racer, event.courses.find((c) => c.id === input.value)),
       racerOffset: () => (racer.start_offset_s = number * 60),
       racerPriority: () => (racer.priority = number),
+      racerPrefer: () => (racer.prefer = input.value),
       pace: () => (racer.pace_profile[ii].seconds_per_km = state.parsePace(input.value, ui.unit) ?? racer.pace_profile[ii].seconds_per_km),
       uncertainty: () => (racer.pace_profile[ii].uncertainty = number / 100),
       earliest: () => (s.earliest = state.withClock(s.earliest, input.value)),
@@ -308,7 +336,7 @@ const actions = {
       minStop: () => (s.min_stop_s = number * 60),
       spacing: () => (s.viewpoint_spacing_m = number),
       decay: () => (s.objective.repeat_decay = number),
-      finishes: () => (s.objective.finishes = input.checked),
+      requireFinishes: () => (s.objective.require_finishes = input.checked),
       courseClosed: () => (s.course_closed = input.checked),
       beam: () => (ui.beam = number),
       replaySeconds: () => (ui.replaySeconds = number),
@@ -321,7 +349,6 @@ const actions = {
 async function exploreAlternatives(generation) {
   if (!ui.itinerary) return;
   const snapshot = structuredClone(event);
-  const finishes = snapshot.spectator.objective.finishes !== false;
   const base = state.planLevels(snapshot, ui.itinerary);
   const options = { beam: ui.beam, trace: false };
   const found = [];
@@ -332,7 +359,7 @@ async function exploreAlternatives(generation) {
       // The network was built at the current speed; a faster variant scales its times instead of rebuilding.
       const { itinerary } = await engine.call("plan", { event: variant, options: { ...options, speed_factor: alt.speedFactor } });
       if (generation !== planGeneration) return;
-      if (state.betterPlan(state.planLevels(variant, itinerary), base, finishes)) found.push({ alt, variant, itinerary });
+      if (state.betterPlan(state.planLevels(variant, itinerary), base)) found.push({ alt, variant, itinerary });
     } catch {
       // A variant that cannot be planned is simply not offered.
     }

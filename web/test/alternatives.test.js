@@ -13,8 +13,6 @@ describe("planLevels", () => {
     };
     expect(planLevels(event, itinerary)).toEqual({ racers: 2, seen: 1, finished: 2, sightings: 4 });
     expect(planSummary(event, itinerary)).toBe("Seen en route 1/2 · finishes 2/2 · 4 sightings");
-    event.spectator.objective.finishes = false;
-    expect(planSummary(event, itinerary)).toBe("Seen en route 1/2 · 4 sightings");
   });
 });
 

@@ -109,7 +109,8 @@ function racersSection(event, ui) {
     <summary><h2>Racers <button data-act="addRacer">+</button></h2></summary>
     ${event.racers
       .map(
-        (racer, ri) => `<div class="card">
+        (racer, ri) => `<details class="card" data-section="racer-${racer.id}" open>
+      <summary><b>${esc(racer.name)}</b> <span class="muted">${esc(event.courses.find((c) => c.id === racer.course_id)?.name ?? "")} · ${state.paceLabel(racer.pace_profile[0]?.seconds_per_km ?? 0, ui.unit)}/${ui.unit.label}</span></summary>
       <div class="row">
         <input data-field="racerName" data-ri="${ri}" value="${esc(racer.name)}">
         <select data-field="racerCourse" data-ri="${ri}">${event.courses.map((c) => `<option value="${c.id}" ${c.id === racer.course_id ? "selected" : ""}>${esc(c.name)}</option>`).join("")}</select>
@@ -118,6 +119,10 @@ function racersSection(event, ui) {
       <div class="row">
         <label>offset <input type="number" data-field="racerOffset" data-ri="${ri}" value="${racer.start_offset_s / 60}" step="1" size="4"> min</label>
         <label>priority <input type="number" data-field="racerPriority" data-ri="${ri}" value="${racer.priority}" step="0.5" min="0" size="3"></label>
+        <label>prefer <select data-field="racerPrefer" data-ri="${ri}" title="which sighting of this racer matters most">
+          <option value="en_route" ${racer.prefer === "finish" ? "" : "selected"}>during</option>
+          <option value="finish" ${racer.prefer === "finish" ? "selected" : ""}>finish</option>
+        </select></label>
       </div>
       <div class="paces">
         ${racer.pace_profile
@@ -132,7 +137,7 @@ function racersSection(event, ui) {
           )
           .join("")}
       </div>
-    </div>`,
+    </details>`,
       )
       .join("")}
   </details>`;
@@ -179,7 +184,7 @@ function settingsSection(event, ui) {
       <label>safety buffer <input type="number" data-field="buffer" value="${s.safety_buffer_s / 60}" min="0" step="0.5" size="3"> min</label>
       <label>min stop <input type="number" data-field="minStop" value="${s.min_stop_s / 60}" min="0" size="3"> min</label>
       <label>viewpoint spacing <input type="number" data-field="spacing" value="${s.viewpoint_spacing_m ?? 120}" min="20" step="10" size="4" title="spots closer than this that see the same courses merge"> m</label>
-      <label><input type="checkbox" data-field="finishes" ${s.objective.finishes === false ? "" : "checked"}> see finishes <span class="muted" title="Priorities: everyone en route, then everyone's finish, then each finish, then each first sighting, then repeats">?</span></label>
+      <label><input type="checkbox" data-field="requireFinishes" ${s.objective.require_finishes ? "checked" : ""}> require every finish <span class="muted" title="Otherwise, in order: everyone seen the way they prefer, everyone's finish, each preferred sighting, each other sighting, repeats">?</span></label>
       <label>breadth ↔ depth <input type="range" data-field="decay" value="${s.objective.repeat_decay}" min="0" max="0.9" step="0.1" title="How much each repeat sighting of a racer is worth relative to the previous one"></label>
       <label><input type="checkbox" data-field="courseClosed" ${s.course_closed ? "checked" : ""}> course closed to crossing</label>
       <label>search effort <select data-field="beam">${options(["16", "64", "256"], String(ui.beam))}</select></label>
@@ -234,6 +239,6 @@ const TRASH = `<svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path fi
 
 const options = (values, selected) => values.map((v) => `<option ${v === selected ? "selected" : ""}>${v}</option>`).join("");
 
-function esc(text) {
+export function esc(text) {
   return String(text).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 }

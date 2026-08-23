@@ -143,6 +143,7 @@ pub fn solve(
         end,
         min_stop: spectator.min_stop_s,
         priorities: event.racers.iter().map(|r| r.priority).collect(),
+        prefer: event.racers.iter().map(|r| r.prefer).collect(),
         objective: spectator.objective.clone(),
         regions,
     };
@@ -258,6 +259,7 @@ mod tests {
                     uncertainty: 0.0,
                 }],
                 priority: 1.0,
+                prefer: Prefer::EnRoute,
             }],
             spectator: SpectatorConfig {
                 start: Some(latlon(0.0, 100.0)),

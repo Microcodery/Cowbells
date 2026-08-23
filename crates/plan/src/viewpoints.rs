@@ -109,7 +109,6 @@ pub fn raw_viewpoints(
 
 /// Each racer's visibility window at every arc of every viewpoint.
 pub fn add_sightings(viewpoints: &mut [Viewpoint], event: &Event) {
-    let finishes = event.spectator.objective.finishes;
     let trajectories: Vec<(usize, Trajectory)> = event
         .racers
         .iter()
@@ -122,8 +121,7 @@ pub fn add_sightings(viewpoints: &mut [Viewpoint], event: &Event) {
         .collect();
     for viewpoint in viewpoints.iter_mut() {
         for (racer, (course, trajectory)) in trajectories.iter().enumerate() {
-            let wanted = |a: &&Arc| a.course == *course && (finishes || !a.finish);
-            for arc in viewpoint.arcs.iter().filter(wanted) {
+            for arc in viewpoint.arcs.iter().filter(|a| a.course == *course) {
                 viewpoint.sightings.push(Sighting {
                     racer,
                     window: trajectory.window(

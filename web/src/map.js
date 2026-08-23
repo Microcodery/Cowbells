@@ -30,9 +30,10 @@ const SOURCES = [
   "replay-fills",
   "replay-lines",
   "replay-points",
+  "hover",
 ];
 
-export function createMap(container, center, onClick) {
+export function createMap(container, center, onClick, onHover) {
   const map = new MapLibre({
     container,
     style: STYLES[currentTheme()],
@@ -42,6 +43,8 @@ export function createMap(container, center, onClick) {
   });
   map.addControl(new NavigationControl(), "top-right");
   map.on("click", (e) => onClick({ lat: e.lngLat.lat, lon: e.lngLat.lng }));
+  map.on("mousemove", (e) => onHover({ lat: e.lngLat.lat, lon: e.lngLat.lng }, e.point, metresPerPixel(map)));
+  map.on("mouseout", () => onHover(null));
   map.on("style.load", () => addLayers(map));
   return map;
 }
@@ -133,7 +136,24 @@ function addLayers(map) {
     layout: { "text-field": ["get", "label"], "text-size": 12, "text-font": ["Noto Sans Bold"] },
     paint: { "text-color": "#fff", "text-opacity-transition": { duration: 600 } },
   });
+  map.addLayer({
+    id: "hover",
+    type: "circle",
+    source: "hover",
+    paint: { "circle-radius": 7, "circle-color": "#fff", "circle-stroke-color": ["get", "color"], "circle-stroke-width": 3 },
+  });
   map.fire("layers-ready");
+}
+
+/** The dot marking the hovered spot on a course; `null` hides it. */
+export function setHover(map, latlon, courseIndex) {
+  const features = latlon ? [feature(pointOf(latlon), { color: COURSE_COLORS[courseIndex % COURSE_COLORS.length] })] : [];
+  map.getSource("hover")?.setData(collection(features));
+}
+
+export function metresPerPixel(map) {
+  const lat = map.getCenter().lat;
+  return (156543.03 * Math.cos((lat * Math.PI) / 180)) / 2 ** map.getZoom();
 }
 
 /** Redraw every overlay from the event and the latest itinerary; vertices only for the course being edited. */
