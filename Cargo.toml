@@ -1,0 +1,19 @@
+[workspace]
+resolver = "3"
+members = ["crates/core", "crates/routing", "crates/plan", "crates/wasm"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "AGPL-3.0-only"
+
+[workspace.dependencies]
+birdeye-core = { path = "crates/core" }
+birdeye-routing = { path = "crates/routing" }
+birdeye-plan = { path = "crates/plan" }
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"

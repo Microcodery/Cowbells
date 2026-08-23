@@ -1,0 +1,9 @@
+[package]
+name = "birdeye-plan"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+birdeye-core.workspace = true
+birdeye-routing.workspace = true

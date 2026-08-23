@@ -1,0 +1,13 @@
+[package]
+name = "birdeye-wasm"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+birdeye-core.workspace = true
+birdeye-plan.workspace = true
+wasm-bindgen = "0.2"
