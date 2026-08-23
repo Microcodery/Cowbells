@@ -67,9 +67,11 @@ a headless browser for tests.
 
 ## Status
 
-Working prototype. Start from an example, draw courses, or import GPX; then
-split segments, add racers with pace profiles, set the spectator's start,
-fetch OpenStreetMap data for the area, and plan. Expect rough edges; see
+Working prototype. Start from an example (map data included), draw courses,
+or import GPX; then split segments, add racers with pace profiles, set the
+spectator's start, fetch OpenStreetMap data for the area, and plan. The public
+Overpass servers can be slow or return 504 under load; saved `.bird` files keep
+the fetched data so a reload never needs them. Expect rough edges; see
 `afx/PLAN.md` for what's next.
 
 ## License

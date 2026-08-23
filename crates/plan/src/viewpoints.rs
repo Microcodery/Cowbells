@@ -11,9 +11,6 @@ use serde::Serialize;
 
 /// Course points are sampled this often along viewable segments.
 const SAMPLE_SPACING_M: f64 = 20.0;
-/// Viewpoints this close that see the same stretch collapse to one representative.
-const CLUSTER_M: f64 = 50.0;
-const CLUSTER_OVERLAP: f64 = 0.8;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -59,14 +56,27 @@ struct CourseSample {
 
 type Indexed = GeomWithData<[f64; 2], usize>;
 
+/// Viewpoints with sightings: every network position within sight of a course, clustered.
 pub fn viewpoints(
+    event: &Event,
+    graph: &impl TravelTime,
+    projection: &Projection,
+) -> Vec<Viewpoint> {
+    let mut kept =
+        cluster(raw_viewpoints(event, graph, projection), event.spectator.viewpoint_spacing_m);
+    add_sightings(&mut kept, event);
+    kept
+}
+
+/// Every network node within sighting radius of a course, with its coverage arcs; not yet clustered.
+pub fn raw_viewpoints(
     event: &Event,
     graph: &impl TravelTime,
     projection: &Projection,
 ) -> Vec<Viewpoint> {
     let (samples, index) = sample_courses(event, projection);
     let radius = event.spectator.sighting_radius_m;
-    let raw: Vec<Viewpoint> = (0..graph.node_count())
+    (0..graph.node_count())
         .filter_map(|node| {
             let point = graph.point(node);
             let seen: Vec<(&CourseSample, f64)> = index
@@ -81,9 +91,11 @@ pub fn viewpoints(
             let arcs = arcs(seen);
             (!arcs.is_empty()).then(|| Viewpoint { node, point, arcs, sightings: Vec::new() })
         })
-        .collect();
-    let mut kept = cluster(raw);
+        .collect()
+}
 
+/// Each racer's visibility window at every arc of every viewpoint.
+pub fn add_sightings(viewpoints: &mut [Viewpoint], event: &Event) {
     let trajectories: Vec<(usize, Trajectory)> = event
         .racers
         .iter()
@@ -94,7 +106,7 @@ pub fn viewpoints(
             (course, Trajectory::new(start, &racer.pace_profile))
         })
         .collect();
-    for viewpoint in &mut kept {
+    for viewpoint in viewpoints.iter_mut() {
         for (racer, (course, trajectory)) in trajectories.iter().enumerate() {
             for arc in viewpoint.arcs.iter().filter(|a| a.course == *course) {
                 let pass = Sighting {
@@ -116,7 +128,6 @@ pub fn viewpoints(
         }
         viewpoint.sightings.sort_by(|a, b| a.window.open.total_cmp(&b.window.open));
     }
-    kept
 }
 
 fn sample_courses(event: &Event, projection: &Projection) -> (Vec<CourseSample>, RTree<Indexed>) {
@@ -175,8 +186,11 @@ fn arc_of(run: &[&(&CourseSample, f64)]) -> Arc {
     }
 }
 
-/// Keep one representative per broad viewable area: the most course covered, then the nearest to it.
-fn cluster(mut raw: Vec<Viewpoint>) -> Vec<Viewpoint> {
+/// Keep one representative per `spacing` metres: the most course covered, then the nearest to it.
+/// Neighbours within `spacing` whose every arc lies within `spacing` along the course of one the
+/// kept viewpoint sees (finish arcs only against finish arcs) are dropped: their windows differ
+/// by at most the walk between them. A return leg passing nearby is a different stretch and stays.
+pub fn cluster(mut raw: Vec<Viewpoint>, spacing: f64) -> Vec<Viewpoint> {
     let coverage = |c: &Viewpoint| c.arcs.iter().map(|a| a.end_m - a.start_m).sum::<f64>();
     let view =
         |c: &Viewpoint| c.arcs.iter().map(|a| a.mean_view_m).sum::<f64>() / c.arcs.len() as f64;
@@ -184,10 +198,10 @@ fn cluster(mut raw: Vec<Viewpoint>) -> Vec<Viewpoint> {
     let mut kept: Vec<Viewpoint> = Vec::new();
     let mut index: RTree<Indexed> = RTree::new();
     for viewpoint in raw {
-        let redundant = index
-            .locate_within_distance(coords(viewpoint.point), CLUSTER_M * CLUSTER_M)
-            .any(|near| {
-                viewpoint.arcs.iter().all(|arc| kept[near.data].arcs.iter().any(|k| covers(k, arc)))
+        let redundant =
+            index.locate_within_distance(coords(viewpoint.point), spacing * spacing).any(|near| {
+                let seen = &kept[near.data].arcs;
+                viewpoint.arcs.iter().all(|arc| seen.iter().any(|k| same_stretch(k, arc, spacing)))
             });
         if !redundant {
             index.insert(Indexed::new(coords(viewpoint.point), kept.len()));
@@ -197,7 +211,9 @@ fn cluster(mut raw: Vec<Viewpoint>) -> Vec<Viewpoint> {
     kept
 }
 
-fn covers(k: &Arc, arc: &Arc) -> bool {
-    let overlap = k.end_m.min(arc.end_m) - k.start_m.max(arc.start_m);
-    k.course == arc.course && overlap >= CLUSTER_OVERLAP * (arc.end_m - arc.start_m)
+fn same_stretch(kept: &Arc, arc: &Arc, spacing: f64) -> bool {
+    kept.course == arc.course
+        && (kept.finish || !arc.finish)
+        && kept.start_m <= arc.end_m + spacing
+        && arc.start_m <= kept.end_m + spacing
 }

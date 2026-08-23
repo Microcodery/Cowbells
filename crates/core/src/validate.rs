@@ -194,6 +194,7 @@ mod tests {
                 sighting_radius_m: 30.0,
                 safety_buffer_s: 120.0,
                 min_stop_s: 60.0,
+                viewpoint_spacing_m: 120.0,
                 course_closed: false,
                 required_regions: vec![],
                 objective: Objective::default(),

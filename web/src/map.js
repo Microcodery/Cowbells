@@ -15,7 +15,7 @@ const STYLES = {
 
 const COURSE_COLORS = ["#2563eb", "#db2777", "#16a34a", "#d97706", "#7c3aed"];
 
-const SOURCES = ["courses", "vertices", "spectator", "regions", "stops", "legs"];
+const SOURCES = ["courses", "vertices", "spectator", "regions", "stops", "legs", "replay-fills", "replay-lines", "replay-points"];
 
 export function createMap(container, center, onClick) {
   const map = new MapLibre({
@@ -46,17 +46,46 @@ function addLayers(map) {
     map.addSource(name, { type: "geojson", data: empty() });
   }
   map.addLayer({ id: "regions", type: "fill", source: "regions", paint: { "fill-color": "#a855f7", "fill-opacity": 0.2 } });
-  map.addLayer({ id: "legs", type: "line", source: "legs", paint: { "line-color": "#f97316", "line-width": 4, "line-dasharray": [1, 1.5] } });
+  // Sighting circles sit under the course lines so the course stays readable during replay.
+  map.addLayer({
+    id: "replay-fills",
+    type: "fill",
+    source: "replay-fills",
+    paint: { "fill-color": ["get", "color"], "fill-opacity": ["get", "opacity"] },
+  });
+  map.addLayer({
+    id: "legs",
+    type: "line",
+    source: "legs",
+    paint: { "line-color": "#f97316", "line-width": 4, "line-dasharray": [1, 1.5], "line-opacity-transition": { duration: 600 } },
+  });
   map.addLayer({ id: "courses", type: "line", source: "courses", paint: { "line-color": ["get", "color"], "line-width": 4, "line-opacity": 0.85 } });
   map.addLayer({ id: "vertices", type: "circle", source: "vertices", paint: { "circle-radius": 4, "circle-color": "#fff", "circle-stroke-color": ["get", "color"], "circle-stroke-width": 2 } });
   map.addLayer({ id: "spectator", type: "circle", source: "spectator", paint: { "circle-radius": 8, "circle-color": ["get", "color"], "circle-stroke-color": "#fff", "circle-stroke-width": 2 } });
-  map.addLayer({ id: "stops", type: "circle", source: "stops", paint: { "circle-radius": 11, "circle-color": "#f97316", "circle-stroke-color": "#fff", "circle-stroke-width": 2 } });
+  map.addLayer({
+    id: "replay-lines",
+    type: "line",
+    source: "replay-lines",
+    paint: { "line-color": ["get", "color"], "line-width": ["get", "width"], "line-opacity": ["get", "opacity"] },
+  });
+  map.addLayer({
+    id: "replay-points",
+    type: "circle",
+    source: "replay-points",
+    paint: { "circle-radius": ["get", "radius"], "circle-color": ["get", "color"], "circle-opacity": 0.8 },
+  });
+  map.addLayer({
+    id: "stops",
+    type: "circle",
+    source: "stops",
+    paint: { "circle-radius": 11, "circle-color": "#f97316", "circle-stroke-color": "#fff", "circle-stroke-width": 2, "circle-opacity-transition": { duration: 600 } },
+  });
   map.addLayer({
     id: "stop-labels",
     type: "symbol",
     source: "stops",
     layout: { "text-field": ["get", "label"], "text-size": 12, "text-font": ["Noto Sans Bold"] },
-    paint: { "text-color": "#fff" },
+    paint: { "text-color": "#fff", "text-opacity-transition": { duration: 600 } },
   });
   map.fire("layers-ready");
 }
@@ -89,6 +118,39 @@ export function render(map, event, itinerary, editingCourse = null) {
   const legs = (itinerary?.legs ?? []).filter((l) => l.path.length >= 2).map((l) => feature(lineOf(l.path)));
   map.getSource("stops").setData(collection(stops));
   map.getSource("legs").setData(collection(legs));
+}
+
+/** Overlay the replay draws on; `clear` wipes it. */
+export function replayCanvas(map) {
+  const layers = { "replay-points": [], "replay-lines": [], "replay-fills": [] };
+  const add = (source, features) => {
+    layers[source] = layers[source].concat(features);
+    map.getSource(source)?.setData(collection(layers[source]));
+  };
+  return {
+    addCircles(latlons, color, radiusM, opacity) {
+      add("replay-fills", latlons.map((p) => feature(circleOf(p, radiusM, 16), { color, opacity })));
+    },
+    addPoints(latlons, color, radius) {
+      add("replay-points", latlons.map((p) => feature(pointOf(p), { color, radius })));
+    },
+    addLines(paths, color, width, opacity) {
+      add("replay-lines", paths.filter((p) => p.length >= 2).map((p) => feature(lineOf(p), { color, width, opacity })));
+    },
+    clear() {
+      for (const source of Object.keys(layers)) {
+        layers[source] = [];
+        map.getSource(source)?.setData(empty());
+      }
+    },
+  };
+}
+
+/** Fade the itinerary layers from hidden to shown (paint transitions do the tweening). */
+export function revealItinerary(map, shown) {
+  map.setPaintProperty("stops", "circle-opacity", shown ? 1 : 0);
+  map.setPaintProperty("stop-labels", "text-opacity", shown ? 1 : 0);
+  map.setPaintProperty("legs", "line-opacity", shown ? 1 : 0);
 }
 
 export function flyTo(map, latlon) {

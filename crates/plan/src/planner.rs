@@ -13,6 +13,7 @@ use std::collections::BinaryHeap;
 use birdeye_core::{Objective, Seconds, Tier};
 use fixedbitset::FixedBitSet;
 
+use crate::trace::{LabelEvent, MAX_LABEL_EVENTS};
 use crate::viewpoints::{Kind, Viewpoint};
 
 #[derive(Debug, Clone)]
@@ -66,11 +67,13 @@ impl Weights {
 pub struct Options {
     /// Labels kept per viewpoint; more is slower and closer to optimal.
     pub beam: usize,
+    /// Record search events for replay (see `trace::LabelEvent`).
+    pub trace: bool,
 }
 
 impl Default for Options {
     fn default() -> Self {
-        Self { beam: 64 }
+        Self { beam: 64, trace: false }
     }
 }
 
@@ -89,6 +92,9 @@ pub struct Plan {
     /// Begins at the start anchor when there is one and ends at the end anchor when there is one.
     pub stops: Vec<Stop>,
     pub score: f64,
+    /// Search events when tracing, capped at `trace::MAX_LABEL_EVENTS`; `events_total` counts all.
+    pub events: Vec<LabelEvent>,
+    pub events_total: usize,
     /// Indices of required regions no stop falls inside.
     pub unmet_regions: Vec<usize>,
 }
@@ -102,6 +108,8 @@ pub fn plan(problem: &Problem, options: Options) -> Plan {
         labels: Vec::new(),
         kept: vec![Vec::new(); problem.viewpoints.len()],
         queue: BinaryHeap::new(),
+        events: Vec::new(),
+        events_total: 0,
     };
     let roots: Vec<usize> = match problem.start {
         Some(start) => vec![start],
@@ -118,7 +126,10 @@ pub fn plan(problem: &Problem, options: Options) -> Plan {
             search.expand(label);
         }
     }
-    search.best_plan()
+    let mut result = search.best_plan();
+    result.events = std::mem::take(&mut search.events);
+    result.events_total = search.events_total;
+    result
 }
 
 #[derive(Debug, Clone)]
@@ -211,17 +222,31 @@ struct Search<'a> {
     /// Surviving label indices per viewpoint, for dominance and the beam.
     kept: Vec<Vec<usize>>,
     queue: BinaryHeap<Queued>,
+    events: Vec<LabelEvent>,
+    events_total: usize,
 }
 
 impl Search<'_> {
     /// Keeps the label unless it is dominated, hopeless, or squeezed out by the beam.
     fn push(&mut self, label: Label) -> Option<usize> {
-        if self.dominated(&label) || !self.can_still_finish(&label) {
+        if !self.can_still_finish(&label) {
+            return None;
+        }
+        if self.dominated(&label) {
+            self.record(LabelEvent::Dominated { parent: label.parent, viewpoint: label.viewpoint });
             return None;
         }
         let index = self.labels.len();
         let at = label.viewpoint;
         self.evict_dominated_by(&label);
+        self.record(LabelEvent::Kept {
+            label: index,
+            parent: label.parent,
+            viewpoint: at,
+            arrive: label.arrive,
+            depart: label.depart,
+            score: self.rank(&label),
+        });
         self.queue.push(Queued { depart: label.depart, label: index });
         self.labels.push(label);
         self.kept[at].push(index);
@@ -249,12 +274,21 @@ impl Search<'_> {
         order.sort_by(|&x, &y| {
             (kept[y] == earliest).cmp(&(kept[x] == earliest)).then(ranks[y].total_cmp(&ranks[x]))
         });
-        let survivors: Vec<usize> =
-            order.iter().take(self.options.beam).map(|&x| kept[x]).collect();
-        for &dropped in order.iter().skip(self.options.beam).map(|x| &kept[*x]) {
-            self.labels[dropped].kill();
+        let (keep, drop) = order.split_at(self.options.beam);
+        let survivors: Vec<usize> = keep.iter().map(|&x| kept[x]).collect();
+        let dropped: Vec<usize> = drop.iter().map(|&x| kept[x]).collect();
+        for label in dropped {
+            self.labels[label].kill();
+            self.record(LabelEvent::Trimmed { label });
         }
         self.kept[at] = survivors;
+    }
+
+    fn record(&mut self, event: LabelEvent) {
+        self.events_total += 1;
+        if self.options.trace && self.events.len() < MAX_LABEL_EVENTS {
+            self.events.push(event);
+        }
     }
 
     fn dominated(&self, label: &Label) -> bool {
@@ -263,13 +297,18 @@ impl Search<'_> {
 
     fn evict_dominated_by(&mut self, label: &Label) {
         let labels = &mut self.labels;
+        let mut killed = Vec::new();
         self.kept[label.viewpoint].retain(|&i| {
             let beaten = dominates(label, &labels[i]);
             if beaten {
                 labels[i].kill();
+                killed.push(i);
             }
             !beaten
         });
+        for i in killed {
+            self.record(LabelEvent::Trimmed { label: i });
+        }
     }
 
     fn can_still_finish(&self, label: &Label) -> bool {
@@ -376,6 +415,8 @@ impl Search<'_> {
             return Plan {
                 stops: Vec::new(),
                 score: 0.0,
+                events: Vec::new(),
+                events_total: 0,
                 unmet_regions: (0..self.problem.regions.len()).collect(),
             };
         };
@@ -405,7 +446,7 @@ impl Search<'_> {
         }
         let unmet_regions =
             (0..self.problem.regions.len()).filter(|&i| !chosen.regions_done.contains(i)).collect();
-        Plan { stops, score: chosen.score, unmet_regions }
+        Plan { stops, score: chosen.score, events: Vec::new(), events_total: 0, unmet_regions }
     }
 }
 
@@ -618,7 +659,7 @@ mod tests {
             viewpoint(1, hub),
             viewpoint(2, vec![sighting(1, 25.0, 26.0)]),
         ]);
-        let plan = plan(&problem, Options { beam: 1 });
+        let plan = plan(&problem, Options { beam: 1, ..Options::default() });
         assert_eq!(plan.score, 200.0);
     }
 }

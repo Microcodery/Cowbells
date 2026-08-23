@@ -110,6 +110,10 @@ pub struct SpectatorConfig {
     pub safety_buffer_s: Seconds,
     #[serde(default = "default_min_stop_s")]
     pub min_stop_s: Seconds,
+    /// Spots closer than this that see the same courses collapse to one viewpoint;
+    /// about a minute's walk is the finest distinction worth planning over.
+    #[serde(default = "default_viewpoint_spacing_m")]
+    pub viewpoint_spacing_m: f64,
     #[serde(default)]
     pub course_closed: bool,
     #[serde(default)]
@@ -190,6 +194,9 @@ fn default_safety_buffer_s() -> f64 {
 }
 fn default_min_stop_s() -> f64 {
     60.0
+}
+fn default_viewpoint_spacing_m() -> f64 {
+    120.0
 }
 
 impl Event {

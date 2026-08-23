@@ -37,7 +37,7 @@ export function renderPanel(root, event, ui, actions) {
         <button data-act="fetch" ${ui.busy ? "disabled" : ""}>Fetch map data</button>
         <button data-act="plan" ${ui.busy || !ui.network ? "disabled" : ""}>Plan</button>
       </div>
-      <p class="muted">${esc(ui.status)}</p>
+      <p class="muted"><span data-status>${esc(ui.status)}</span> ${ui.replaying ? `<button data-act="skipReplay">Skip</button>` : ""}</p>
       ${ui.itinerary ? results(ui.itinerary, event) : ""}
     </section>`;
 
@@ -157,9 +157,11 @@ function spectatorSection(event, ui) {
       <label>sighting radius <input type="number" data-field="radius" value="${s.sighting_radius_m}" min="5" size="3"> m</label>
       <label>safety buffer <input type="number" data-field="buffer" value="${s.safety_buffer_s / 60}" min="0" step="0.5" size="3"> min</label>
       <label>min stop <input type="number" data-field="minStop" value="${s.min_stop_s / 60}" min="0" size="3"> min</label>
+      <label>viewpoint spacing <input type="number" data-field="spacing" value="${s.viewpoint_spacing_m ?? 120}" min="20" step="10" size="4" title="spots closer than this that see the same courses merge"> m</label>
       <label>breadth ↔ depth <input type="range" data-field="decay" value="${s.objective.repeat_decay}" min="0" max="1" step="0.1" title="How much each repeat sighting of a racer is worth relative to the previous one"></label>
       <label><input type="checkbox" data-field="courseClosed" ${s.course_closed ? "checked" : ""}> course closed to crossing</label>
       <label>search effort <select data-field="beam">${options(["16", "64", "256"], String(ui.beam))}</select></label>
+      <label>replay length <input type="range" data-field="replaySeconds" value="${ui.replaySeconds}" min="1" max="60" step="1" title="seconds to animate the planner's steps after each plan; click the map to skip"> ${ui.replaySeconds}s</label>
     </details>
   </section>`;
 }

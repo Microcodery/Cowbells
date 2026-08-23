@@ -1,7 +1,8 @@
 import "./style.css";
 import { createEngine } from "./engine.js";
 import { itineraryToGpx } from "./gpx.js";
-import { createMap, currentTheme, flyTo, mapCenter, render as renderMap, setTheme } from "./map.js";
+import { createMap, currentTheme, flyTo, mapCenter, render as renderMap, replayCanvas, revealItinerary, setTheme } from "./map.js";
+import { replay } from "./replay.js";
 import { fetchOsm } from "./overpass.js";
 import { renderPanel } from "./panel.js";
 import * as state from "./state.js";
@@ -12,7 +13,17 @@ const AUTOSAVE_DELAY_MS = 500;
 
 const engine = createEngine();
 const panel = document.getElementById("panel");
-const ui = { tool: null, itinerary: null, network: null, osm: null, status: "Draw a course to begin.", busy: false, beam: 64 };
+const ui = {
+  tool: null,
+  itinerary: null,
+  network: null,
+  osm: null,
+  status: "Draw a course to begin.",
+  busy: false,
+  beam: 64,
+  replaySeconds: 6,
+  replaying: null,
+};
 
 let event = loadSaved() ?? state.newEvent(DEFAULT_CENTER);
 const map = createMap("map", event.origin, onMapClick);
@@ -45,6 +56,10 @@ function mutate(edit) {
 }
 
 function onMapClick(latlon) {
+  if (ui.replaying) {
+    ui.replaying.skip = true;
+    return;
+  }
   const tool = ui.tool;
   if (!tool) return;
   mutate(() => {
@@ -175,13 +190,14 @@ const actions = {
     await run("Loading example…", async () => {
       const response = await fetch(`${import.meta.env.BASE_URL}examples/${name}.bird`);
       if (!response.ok) throw new Error(`example ${name} not found`);
-      event = await response.json();
+      const saved = await response.json();
+      event = saved.event;
       state.rebase(event, state.todayAt("09:00"));
-      ui.osm = null;
+      ui.osm = saved.osm;
       ui.network = null;
       ui.itinerary = null;
       flyTo(map, event.origin);
-      ui.status = "Example loaded. Fetch map data, then plan.";
+      ui.status = await buildNetwork();
     });
   },
   async gpx(_, input) {
@@ -210,9 +226,18 @@ const actions = {
     await run("Planning…", async () => {
       const problems = await engine.call("validate", { event });
       if (problems.length) throw new Error(problems.join("; "));
-      ui.itinerary = await engine.call("plan", { event, options: { beam: ui.beam } });
-      ui.status = `Score ${Math.round(ui.itinerary.score)}.`;
+      const { itinerary, trace } = await engine.call("plan", { event, options: { beam: ui.beam, trace: true } });
+      // The previous itinerary fades out before the replay and the new one fades in after it.
+      revealItinerary(map, false);
+      await replayTrace(trace);
+      ui.itinerary = itinerary;
+      ui.status = `Score ${Math.round(itinerary.score)}.`;
+      draw();
+      requestAnimationFrame(() => revealItinerary(map, true));
     });
+  },
+  skipReplay() {
+    if (ui.replaying) ui.replaying.skip = true;
   },
   edit({ field, ci, si, ri, ii, gi }, input) {
     const course = event.courses[ci];
@@ -242,13 +267,28 @@ const actions = {
       radius: () => (s.sighting_radius_m = number),
       buffer: () => (s.safety_buffer_s = number * 60),
       minStop: () => (s.min_stop_s = number * 60),
+      spacing: () => (s.viewpoint_spacing_m = number),
       decay: () => (s.objective.repeat_decay = number),
       courseClosed: () => (s.course_closed = input.checked),
       beam: () => (ui.beam = number),
+      replaySeconds: () => (ui.replaySeconds = number),
     };
     mutate(() => edits[field]?.());
   },
 };
+
+async function replayTrace(trace) {
+  ui.replaying = { skip: false };
+  renderPanel(panel, event, ui, actions);
+  // Status changes every frame; rebuilding the whole panel that often would drop input focus.
+  const narrate = (text) => {
+    ui.status = text;
+    panel.querySelector("[data-status]").textContent = text;
+  };
+  const radius = event.spectator.sighting_radius_m;
+  await replay(trace, replayCanvas(map), radius, () => ui.replaySeconds, narrate, ui.replaying);
+  ui.replaying = null;
+}
 
 function download(filename, text, type) {
   const a = Object.assign(document.createElement("a"), { href: URL.createObjectURL(new Blob([text], { type })), download: filename });

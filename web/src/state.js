@@ -19,6 +19,7 @@ export function newEvent(center) {
       sighting_radius_m: 30,
       safety_buffer_s: 120,
       min_stop_s: 60,
+      viewpoint_spacing_m: 120,
       course_closed: false,
       required_regions: [],
       objective: { tiers: ["en_route", "finish"], repeat_decay: 0.5 },

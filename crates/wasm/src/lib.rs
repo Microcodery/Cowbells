@@ -4,7 +4,7 @@ use birdeye_core::geom::{Point, Projection};
 use birdeye_core::{Event, TravelMode};
 use birdeye_plan::Options;
 use birdeye_routing::{Graph, Osm, TravelTime};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use wasm_bindgen::prelude::*;
 
 /// Spectator edges this close to a course are split so viewpoints can sit mid-block.
@@ -60,7 +60,7 @@ impl Network {
         self.graph.edge_count()
     }
 
-    /// The itinerary for `event_json`, as JSON.
+    /// `{ itinerary, trace }` for `event_json`, as JSON; `trace` is null unless options ask for it.
     pub fn plan(&self, event_json: &str, options_json: &str) -> Result<String, JsError> {
         let event: Event = serde_json::from_str(event_json)?;
         if event.spectator.mode != self.mode {
@@ -79,9 +79,13 @@ impl Network {
         if event.spectator.course_closed {
             graph.close_courses(&courses);
         }
-        let itinerary = birdeye_plan::solve(&event, &graph, Options { beam: options.beam })
-            .map_err(|e| JsError::new(&e.to_string()))?;
-        Ok(serde_json::to_string(&itinerary)?)
+        let solution = birdeye_plan::solve(
+            &event,
+            &graph,
+            Options { beam: options.beam, trace: options.trace },
+        )
+        .map_err(|e| JsError::new(&e.to_string()))?;
+        Ok(serde_json::to_string(&solution)?)
     }
 }
 
@@ -90,10 +94,12 @@ fn samples_along(polyline: &birdeye_core::geom::Polyline) -> Vec<Point> {
     (0..=steps).map(|i| polyline.point_at(i as f64 * DENSIFY_SPACING_M)).collect()
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Deserialize)]
 struct PlanOptions {
     #[serde(default = "default_beam")]
     beam: usize,
+    #[serde(default)]
+    trace: bool,
 }
 
 fn default_beam() -> usize {

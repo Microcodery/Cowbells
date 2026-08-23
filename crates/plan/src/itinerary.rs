@@ -9,7 +9,8 @@ use serde::Serialize;
 use thiserror::Error;
 
 use crate::planner::{Options, Problem, Region, plan};
-use crate::viewpoints::{Kind, Viewpoint, viewpoints};
+use crate::trace::{Trace, leg_traces, network_trace, viewpoint_traces};
+use crate::viewpoints::{Kind, Viewpoint, add_sightings, cluster, raw_viewpoints};
 
 #[derive(Debug, Error)]
 pub enum SolveError {
@@ -55,6 +56,13 @@ pub struct Itinerary {
     pub unmet_regions: Vec<usize>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct Solution {
+    pub itinerary: Itinerary,
+    /// Present when `Options::trace` was set.
+    pub trace: Option<Trace>,
+}
+
 /// Snapping tolerance for the spectator's own start and end points.
 const SPECTATOR_SNAP_M: f64 = 200.0;
 
@@ -63,14 +71,18 @@ pub fn solve(
     event: &Event,
     graph: &impl TravelTime,
     options: Options,
-) -> Result<Itinerary, SolveError> {
+) -> Result<Solution, SolveError> {
     let projection = Projection::new(event.origin);
     let spectator = &event.spectator;
-    let mut all = viewpoints(event, graph, &projection);
+    let raw = raw_viewpoints(event, graph, &projection);
+    let raw_locations = options
+        .trace
+        .then(|| raw.iter().map(|v| projection.to_latlon(v.point)).collect::<Vec<_>>());
+    let mut all = cluster(raw, spectator.viewpoint_spacing_m);
+    add_sightings(&mut all, event);
     if all.is_empty() {
         return Err(SolveError::NoViewpoints);
     }
-
     let mut anchor = |latlon: LatLon, err: SolveError| -> Result<usize, SolveError> {
         let node = graph.snap(projection.to_local(latlon), SPECTATOR_SNAP_M).ok_or(err)?;
         if let Some(existing) = all.iter().position(|c| c.node == node) {
@@ -95,6 +107,16 @@ pub fn solve(
         )),
         None => None,
     };
+
+    // Built from `all` after anchoring so trace indices match the ones the search reports.
+    let mut trace = raw_locations.map(|raw_viewpoints| Trace {
+        network: network_trace(graph, &projection),
+        raw_viewpoints,
+        viewpoints: viewpoint_traces(&all, event, &projection),
+        labels: Vec::new(),
+        labels_total: 0,
+        legs: Vec::new(),
+    });
 
     let regions = spectator
         .required_regions
@@ -167,7 +189,14 @@ pub fn solve(
         .filter(|r| !stops.iter().any(|s| s.seen.iter().any(|seen| seen.racer_id == r.id)))
         .map(|r| r.id.clone())
         .collect();
-    Ok(Itinerary { stops, legs, score: result.score, unseen, unmet_regions: result.unmet_regions })
+    if let Some(trace) = &mut trace {
+        trace.legs = leg_traces(&result.events, &nodes, graph, &projection);
+        trace.labels = result.events;
+        trace.labels_total = result.events_total;
+    }
+    let itinerary =
+        Itinerary { stops, legs, score: result.score, unseen, unmet_regions: result.unmet_regions };
+    Ok(Solution { itinerary, trace })
 }
 
 #[cfg(test)]
@@ -176,6 +205,8 @@ mod tests {
     use birdeye_routing::Graph;
 
     use super::*;
+    use crate::trace::LabelEvent;
+    use crate::viewpoints::viewpoints;
 
     const ORIGIN: LatLon = LatLon { lat: 45.0, lon: -122.0 };
 
@@ -237,6 +268,7 @@ mod tests {
                 sighting_radius_m: 30.0,
                 safety_buffer_s: 10.0,
                 min_stop_s: 0.0,
+                viewpoint_spacing_m: 50.0,
                 course_closed: false,
                 required_regions: vec![],
                 objective: Objective::default(),
@@ -246,7 +278,19 @@ mod tests {
 
     #[test]
     fn follows_the_racer_down_the_row_and_catches_the_finish() {
-        let itinerary = solve(&event(), &grid(), Options::default()).unwrap();
+        let solution =
+            solve(&event(), &grid(), Options { trace: true, ..Options::default() }).unwrap();
+        let trace = solution.trace.unwrap();
+        assert_eq!(trace.network.len(), 25);
+        assert!(!trace.raw_viewpoints.is_empty());
+        assert!(
+            trace.viewpoints.len() <= trace.raw_viewpoints.len() + 1,
+            "clustered plus the start anchor"
+        );
+        assert!(trace.labels.iter().any(|e| matches!(e, LabelEvent::Kept { .. })));
+        assert!(trace.legs.iter().all(|l| l.path.len() >= 2 && l.from != l.to));
+        assert!(!trace.legs.is_empty());
+        let itinerary = solution.itinerary;
         assert!(itinerary.unseen.is_empty());
         let kinds: Vec<Kind> =
             itinerary.stops.iter().flat_map(|s| s.seen.iter().map(|x| x.kind)).collect();
@@ -262,7 +306,8 @@ mod tests {
 
     #[test]
     fn densified_grid_offers_mid_block_viewpoints() {
-        let event = event();
+        let mut event = event();
+        event.spectator.viewpoint_spacing_m = 20.0;
         let mut graph = grid();
         let projection = Projection::new(ORIGIN);
         let course: Vec<Point> = event.courses[0]
@@ -270,9 +315,10 @@ mod tests {
             .iter()
             .flat_map(|p| p.points().collect::<Vec<_>>())
             .collect();
+        let corners_only = viewpoints(&event, &graph, &projection).len();
         graph.densify_near(&course, 30.0, 25.0);
         let all = viewpoints(&event, &graph, &projection);
-        assert!(all.len() > 5, "expected mid-block viewpoints, got {}", all.len());
+        assert!(all.len() > corners_only, "expected mid-block viewpoints, got {}", all.len());
     }
 
     #[test]
@@ -287,6 +333,27 @@ mod tests {
         let corner = all.iter().find(|c| c.point == Point::new(200.0, 0.0)).unwrap();
         assert_eq!(corner.sightings.len(), 2);
         assert!(corner.sightings[0].expected < corner.sightings[1].expected);
+    }
+
+    #[test]
+    fn wide_spacing_merges_corners_but_keeps_the_finish() {
+        let mut event = event();
+        event.spectator.viewpoint_spacing_m = 120.0;
+        let all = viewpoints(&event, &grid(), &Projection::new(ORIGIN));
+        assert!(all.len() < 5, "got {}", all.len());
+        assert!(all.iter().any(|v| v.arcs.iter().any(|a| a.finish)));
+    }
+
+    #[test]
+    fn return_leg_on_the_next_street_survives_clustering() {
+        let mut event = event();
+        event.spectator.viewpoint_spacing_m = 120.0;
+        event.courses[0].segments[0].points =
+            vec![latlon(0.0, 0.0), latlon(400.0, 0.0), latlon(400.0, 100.0), latlon(0.0, 100.0)];
+        event.racers[0].pace_profile[0].end_m = 900.0;
+        let all = viewpoints(&event, &grid(), &Projection::new(ORIGIN));
+        let sees = |from: f64| all.iter().any(|v| v.arcs.iter().any(|a| a.start_m >= from));
+        assert!(sees(500.0) && all.iter().any(|v| v.arcs.iter().any(|a| a.end_m <= 400.0)));
     }
 
     #[test]
