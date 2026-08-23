@@ -183,9 +183,10 @@ function scheduleMapData() {
   mapDataTimer = setTimeout(() => ensureMapData(), ui.debug.mapDataDelayMs);
 }
 
-function onMapClick(latlon) {
+function onMapClick(latlon, metresPerPixel) {
   const tool = ui.tool;
-  if (!tool) return;
+  // With no tool active a tap is a hover: phones have no pointer to hover with.
+  if (!tool) return onMapHover(latlon, metresPerPixel);
   mutate(() => {
     if (tool.kind === "draw") state.addPoint(event.courses[tool.courseIndex], latlon);
     if (tool.kind === "start") event.spectator.start = latlon;
@@ -202,9 +203,10 @@ function onMapClick(latlon) {
 }
 
 /** Hovering a course marks the spot and lists when each racer on it should pass. */
-function onMapHover(latlon, point, metresPerPixel) {
+function onMapHover(latlon, metresPerPixel) {
   const hits = latlon ? state.nearestOnEachCourse(event, latlon).filter((h) => h.metres <= ui.debug.hoverPx * metresPerPixel) : [];
   if (!hits.length) {
+    hoverAnchor = null;
     setHover(map, null);
     hoverTip.hidden = true;
     return;
@@ -218,12 +220,22 @@ function onMapHover(latlon, point, metresPerPixel) {
     return `<div>${esc(course.name)} · ${state.distanceLabel(metres, ui.unit, 1)}</div><ul>${rows.join("") || "<li class='muted'>no racers</li>"}</ul>`;
   });
   hoverTip.innerHTML = blocks.join("");
-  hoverTip.style.left = `${point.x + 14}px`;
-  hoverTip.style.top = `${point.y + 14}px`;
-  hoverTip.hidden = false;
   const nearest = hits.reduce((a, b) => (b.d2 < a.d2 ? b : a));
+  hoverAnchor = nearest.latlon;
+  placeHoverTip();
+  hoverTip.hidden = false;
   setHover(map, nearest.latlon, nearest.courseIndex);
 }
+
+/** The tip sits beside the spot on the course, so it rides along when the map pans or zooms. */
+let hoverAnchor = null;
+function placeHoverTip() {
+  if (!hoverAnchor) return;
+  const point = map.project([hoverAnchor.lon, hoverAnchor.lat]);
+  hoverTip.style.left = `${point.x + 14}px`;
+  hoverTip.style.top = `${point.y + 14}px`;
+}
+map.on("move", placeHoverTip);
 
 function toggleTool(kind, courseIndex) {
   const same = ui.tool?.kind === kind && ui.tool.courseIndex === courseIndex;

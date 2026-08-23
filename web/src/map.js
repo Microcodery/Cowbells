@@ -42,9 +42,13 @@ export function createMap(container, center, onClick, onHover) {
     attributionControl: { compact: true },
   });
   map.addControl(new NavigationControl(), "top-right");
-  map.on("click", (e) => onClick({ lat: e.lngLat.lat, lon: e.lngLat.lng }));
-  map.on("mousemove", (e) => onHover({ lat: e.lngLat.lat, lon: e.lngLat.lng }, e.point, metresPerPixel(map)));
-  map.on("mouseout", () => onHover(null));
+  map.on("click", (e) => onClick({ lat: e.lngLat.lat, lon: e.lngLat.lng }, metresPerPixel(map)));
+  // Touch devices synthesise mouse events around a tap, including a mouseout that would hide
+  // what the tap just showed; they get hover from taps instead (see the click handler).
+  if (matchMedia("(hover: hover)").matches) {
+    map.on("mousemove", (e) => onHover({ lat: e.lngLat.lat, lon: e.lngLat.lng }, metresPerPixel(map)));
+    map.on("mouseout", () => onHover(null));
+  }
   map.on("style.load", () => addLayers(map));
   return map;
 }

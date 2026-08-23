@@ -247,7 +247,7 @@ function results(itinerary, event, ui) {
     .join("");
   const unseen = itinerary.unseen.length ? `<p class="warn">Never seen: ${itinerary.unseen.map(name).map(esc).join(", ")}</p>` : "";
   const unmet = itinerary.unmet_regions.length ? `<p class="warn">Could not visit area ${itinerary.unmet_regions.map((i) => i + 1).join(", ")}</p>` : "";
-  return `<p>${state.planSummary(event, itinerary)} <button data-act="exportGpx">Export GPX</button></p>
+  return `<p><button data-act="exportGpx">Export GPX</button></p>
     <ol class="stops">${stops}</ol>${unseen}${unmet}${alternatives(ui)}`;
 }
 
