@@ -26,6 +26,19 @@ describe("hovering a course", () => {
   });
 });
 
+describe("largestCourse", () => {
+  it("picks the longest course and null when nothing is drawn", async () => {
+    const { largestCourse } = await import("../src/state.js");
+    const event = newEvent({ lat: 0, lon: 0 });
+    expect(largestCourse(event)).toBeNull();
+    event.courses.push(
+      { id: "a", segments: [{ points: [{ lat: 0, lon: 0 }, { lat: 0, lon: 0.01 }] }] },
+      { id: "b", segments: [{ points: [{ lat: 0, lon: 0 }, { lat: 0, lon: 0.03 }] }] },
+    );
+    expect(largestCourse(event).id).toBe("b");
+  });
+});
+
 describe("pace in display units", () => {
   it("round-trips per mile and per kilometre", () => {
     expect(paceLabel(360)).toBe("6:00");

@@ -1,7 +1,8 @@
 import "./style.css";
 import { createEngine } from "./engine.js";
 import { itineraryToGpx } from "./gpx.js";
-import { createMap, currentTheme, flyTo, mapCenter, render as renderMap, replayCanvas, revealItinerary, setHover, setTheme } from "./map.js";
+import { createMap, currentTheme, fitTo, flyTo, mapCenter, render as renderMap, replayCanvas, revealItinerary, setHover, setTheme } from "./map.js";
+import { loadMapData, saveMapData } from "./store.js";
 import { liveReplay } from "./replay.js";
 import { bbox, covers, fetchOsm } from "./overpass.js";
 import { esc, renderHeader, renderPanel } from "./panel.js";
@@ -43,6 +44,28 @@ const scan = document.getElementById("scan");
 /** On phones the panel covers the map; planning closes it so the progress is visible. */
 const closePanelOnPhones = () => matchMedia("(max-width: 700px)").matches && document.body.classList.remove("panel-open");
 map.on("layers-ready", draw);
+map.once("layers-ready", restoreMapData);
+
+/** After a reload the event comes back from localStorage; its map data comes back from IndexedDB. */
+async function restoreMapData() {
+  if (!hasCourse()) return;
+  const saved = await loadMapData();
+  if (saved && covers(saved.box, bbox(event))) {
+    ui.osm = saved.osm;
+    ui.osmBox = saved.box;
+    narrate(await buildNetwork());
+    draw();
+  } else {
+    scheduleMapData();
+  }
+}
+
+/** Frame the longest course, with a margin, whenever a new event arrives. */
+function showCourses() {
+  const longest = state.largestCourse(event);
+  if (longest) fitTo(map, longest.segments.flatMap((s) => s.points));
+  else flyTo(map, event.origin);
+}
 window.birdseye = { map, event: () => event };
 
 let autosave;
@@ -101,6 +124,7 @@ function ensureMapData() {
       ui.osm = osm;
       ui.osmBox = needed;
       ui.network = null;
+      saveMapData({ osm, box: needed });
       narrate(await buildNetwork());
     } catch (err) {
       narrate(`Map data: ${err.message}`);
@@ -299,9 +323,10 @@ const actions = {
       event = loaded;
       ui.osm = saved.osm ?? null;
       ui.osmBox = ui.osm ? bbox(event) : null;
+      saveMapData(ui.osm ? { osm: ui.osm, box: ui.osmBox } : null);
       ui.network = null;
       ui.itinerary = null;
-      flyTo(map, state.courseCenter(event, event.origin));
+      showCourses();
       ui.status = ui.osm ? await buildNetwork() : "Loaded.";
       if (!ui.osm) scheduleMapData();
     });
@@ -319,9 +344,10 @@ const actions = {
       if (state.overTierLimit(event, ui.tier)) actions.toggleTier();
       ui.osm = saved.osm ?? null;
       ui.osmBox = ui.osm ? bbox(event) : null;
+      saveMapData(ui.osm ? { osm: ui.osm, box: ui.osmBox } : null);
       ui.network = null;
       ui.itinerary = null;
-      flyTo(map, state.courseCenter(event, event.origin));
+      showCourses();
       ui.status = ui.osm ? await buildNetwork() : "Example loaded.";
       if (!ui.osm) scheduleMapData();
     });
@@ -339,13 +365,22 @@ const actions = {
         event.courses.push(course);
       }
       ui.itinerary = null;
-      if (courses.length) flyTo(map, state.courseCenter(event, event.origin));
+      if (courses.length) showCourses();
       ui.status = `Imported ${courses.length} course(s).`;
     });
     ensureMapData();
   },
   togglePanel() {
     document.body.classList.toggle("panel-open");
+  },
+  reset() {
+    if (!confirm("Start over? This clears the courses, racers, settings, and fetched map data.")) return;
+    event = state.newEvent(mapCenter(map));
+    Object.assign(ui, { osm: null, osmBox: null, network: null, itinerary: null, alternatives: null, tool: null, banner: null, status: "Draw a course to begin." });
+    localStorage.removeItem(STORAGE_KEY);
+    saveMapData(null);
+    planGeneration++;
+    draw();
   },
   async plan() {
     let planned = false;

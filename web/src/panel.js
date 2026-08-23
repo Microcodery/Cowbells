@@ -30,6 +30,7 @@ export function renderPanel(root, event, ui, actions) {
       <div class="row">
         <button data-act="save" title="Save event as .bird">Save</button>
         <label class="button" title="Load a .bird event">Load<input type="file" accept=".bird,.json" data-act="load" hidden ${ui.busy ? "disabled" : ""}></label>
+        <button data-act="reset" title="Start over with an empty event" ${ui.busy ? "disabled" : ""}>Reset</button>
       </div>
       <label>Event <input data-field="name" value="${esc(event.name)}"></label>
     </section>

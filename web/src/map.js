@@ -229,6 +229,22 @@ export function revealItinerary(map, shown) {
   map.setPaintProperty("legs", "line-opacity", shown ? 1 : 0);
 }
 
+/** Frame `points` with a margin of a tenth of their extent on every side. */
+export function fitTo(map, points) {
+  if (points.length < 2) return;
+  const lats = points.map((p) => p.lat);
+  const lons = points.map((p) => p.lon);
+  const [south, north, west, east] = [Math.min(...lats), Math.max(...lats), Math.min(...lons), Math.max(...lons)];
+  const [dy, dx] = [(north - south) * 0.1 || 0.001, (east - west) * 0.1 || 0.001];
+  map.fitBounds(
+    [
+      [west - dx, south - dy],
+      [east + dx, north + dy],
+    ],
+    { duration: 800 },
+  );
+}
+
 export function flyTo(map, latlon) {
   map.flyTo({ center: [latlon.lon, latlon.lat], zoom: Math.max(map.getZoom(), 15) });
 }

@@ -184,6 +184,11 @@ export function addRegion(event, center) {
   event.spectator.required_regions.push({ center, radius_m: DEFAULT_REGION_RADIUS_M, latest: null });
 }
 
+/** The course covering the most ground, or null when none has a line yet. */
+export function largestCourse(event) {
+  return event.courses.reduce((best, c) => (courseLength(c) > (best ? courseLength(best) : 0) ? c : best), null);
+}
+
 export function courseLength(course) {
   return course.segments.reduce((sum, s) => sum + polylineLength(s.points), 0);
 }
