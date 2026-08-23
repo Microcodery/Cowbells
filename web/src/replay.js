@@ -89,7 +89,7 @@ async function replaySearch(trace, ctx, radius, seconds, onStatus, controller) {
     const legs = best.chain.slice(1).map((to, k) => leg(best.chain[k], to));
     ctx.addLines(legs, BEST_COLOR, 4, 0.9);
     ctx.addCircles(best.chain.map(at), BEST_COLOR, radius, 0.8);
-    onStatus(`Searching ${i}/${total}${sampled} · teal = top-scoring plan so far (${Math.round(Math.max(0, best.score))})`);
+    onStatus(`Searching ${i}/${total}${sampled} · teal = best plan so far`);
     await new Promise(requestAnimationFrame);
   }
 }

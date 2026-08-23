@@ -1,12 +1,12 @@
 // The spectator's itinerary as GPX: one track for the walk, one waypoint per stop.
 
-import { clock, stopLabel, visibleSightings } from "./state.js";
+import { clock, stopLabel } from "./state.js";
 
 export function itineraryToGpx(itinerary, event) {
   const name = (id) => event.racers.find((r) => r.id === id)?.name ?? id;
   const iso = (epoch) => new Date(epoch * 1000).toISOString();
   const waypoints = itinerary.stops.map((stop, i) => {
-    const seen = visibleSightings(stop).map((s) => `${name(s.racer_id)} ${s.kind} ~${clock(s.expected)}`).join(", ");
+    const seen = stop.seen.map((s) => `${name(s.racer_id)} ${s.kind} ~${clock(s.expected)}`).join(", ");
     const label = stopLabel(event, i);
     return `  <wpt lat="${stop.location.lat}" lon="${stop.location.lon}">
     <time>${iso(stop.arrive)}</time>

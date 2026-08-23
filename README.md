@@ -31,14 +31,19 @@ Runs entirely in the browser as a static page: no account, no backend.
 - **Planning:** viewpoints are spots on the spectator network within sight of
   a stretch of course; each racer's visibility window there follows from their
   pace profile. An orienteering-with-time-windows solver picks the itinerary
-  that best serves the priority tiers (everyone once, everyone's finish, extras).
+  with the best priorities, strictly in order: everyone seen en route, then
+  everyone's finish, then each finish, then each first sighting, then repeats
+  (with diminishing returns). Finishes can be switched off.
 - **Results:** numbered stops on the map with arrive/leave times and who you'll
-  see; unseen racers and unreachable areas called out.
+  see; unseen racers and unreachable areas called out. Once a plan is shown,
+  looser settings (moving faster, a shorter safety buffer, no minimum stop)
+  are tried in the background and offered when they do clearly better.
 - **Files:** save/load the whole event as a `.bird` file; export the
   spectator's itinerary as GPX (a track plus a waypoint per stop).
-- **Examples:** two sample `.bird` events in the header dropdown — a downtown
-  loop with two racers, and a three-distance event (short/medium/long sharing
-  start and finish) with four racers.
+- **Examples:** sample `.bird` events in the header dropdown, map data
+  included — a downtown loop with two racers; a 5K, 10K, and half marathon
+  sharing start and finish with five racers; and an 8.6 km out-and-back whose
+  outbound and return legs run three blocks apart, with six racers.
 
 Engine in Rust compiled to WebAssembly; map UI in plain JavaScript with
 MapLibre GL.

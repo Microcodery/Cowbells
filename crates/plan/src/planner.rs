@@ -10,7 +10,7 @@
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 
-use birdeye_core::{Objective, Seconds, Tier};
+use birdeye_core::{Objective, Seconds, Weights};
 use fixedbitset::FixedBitSet;
 
 use crate::trace::{LabelEvent, MAX_LABEL_EVENTS};
@@ -41,26 +41,9 @@ pub struct Region {
     pub latest: Option<Seconds>,
 }
 
-/// Objective weights resolved for this field of racers.
-struct Weights {
-    en_route: f64,
-    finish: f64,
-    /// Missing a required region costs more than a whole tier could earn.
-    region_penalty: f64,
-}
-
-impl Weights {
-    fn for_problem(problem: &Problem) -> Self {
-        let objective = &problem.objective;
-        let racers = problem.priorities.len();
-        let max_priority = problem.priorities.iter().cloned().fold(0.0, f64::max);
-        let top = objective.weight(objective.tiers[0], racers, max_priority);
-        Self {
-            en_route: objective.weight(Tier::EnRoute, racers, max_priority),
-            finish: objective.weight(Tier::Finish, racers, max_priority),
-            region_penalty: top * objective.tier_base(racers, max_priority),
-        }
-    }
+fn weights_for(problem: &Problem) -> Weights {
+    let max_priority = problem.priorities.iter().cloned().fold(0.0, f64::max);
+    problem.objective.weights(problem.priorities.len(), max_priority)
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -104,7 +87,8 @@ pub fn plan(problem: &Problem, options: Options) -> Plan {
     let mut search = Search {
         problem,
         options,
-        weights: Weights::for_problem(problem),
+        weights: weights_for(problem),
+        field: (0..problem.priorities.len()).filter(|&r| problem.priorities[r] > 0.0).collect(),
         labels: Vec::new(),
         kept: vec![Vec::new(); problem.viewpoints.len()],
         queue: BinaryHeap::new(),
@@ -205,12 +189,14 @@ impl PartialOrd for Queued {
     }
 }
 
-/// `a` leaves no later, scores no less, and has at least as much left to gain.
-fn dominates(a: &Label, b: &Label) -> bool {
-    a.depart <= b.depart
+/// `a` leaves no later, scores no less, and has at least as much left to gain. Sound because
+/// every sighting of a racer who counts is worth strictly more to the label that lacks it.
+fn dominates(a: &Label, b: &Label, finishes: bool) -> bool {
+    a.alive
+        && a.depart <= b.depart
         && a.score >= b.score
         && a.seen.iter().zip(&b.seen).all(|(x, y)| x <= y)
-        && a.finished.is_subset(&b.finished)
+        && (!finishes || a.finished.is_subset(&b.finished))
         && a.regions_done.is_superset(&b.regions_done)
 }
 
@@ -218,6 +204,8 @@ struct Search<'a> {
     problem: &'a Problem,
     options: Options,
     weights: Weights,
+    /// Racers with positive priority: the ones "everyone" means.
+    field: Vec<usize>,
     labels: Vec<Label>,
     /// Surviving label indices per viewpoint, for dominance and the beam.
     kept: Vec<Vec<usize>>,
@@ -256,7 +244,8 @@ impl Search<'_> {
         Some(index)
     }
 
-    /// Drops the lowest-scoring labels, always sparing the earliest departure: it has the most future.
+    /// Drops the lowest-keyed labels, always sparing the earliest departure and the broadest
+    /// coverage: those two have the most future.
     fn trim_beam(&mut self, at: usize) {
         let labels = &self.labels;
         let kept = &self.kept[at];
@@ -269,10 +258,15 @@ impl Search<'_> {
                     .then(labels[b].score.total_cmp(&labels[a].score))
             })
             .expect("non-empty");
-        let ranks: Vec<f64> = kept.iter().map(|&i| self.rank(&labels[i])).collect();
+        let broadest = *kept
+            .iter()
+            .max_by_key(|&&i| (self.seen_of_field(&labels[i]), i == earliest))
+            .expect("non-empty");
+        let keys: Vec<f64> = kept.iter().map(|&i| self.beam_key(&labels[i])).collect();
         let mut order: Vec<usize> = (0..kept.len()).collect();
         order.sort_by(|&x, &y| {
-            (kept[y] == earliest).cmp(&(kept[x] == earliest)).then(ranks[y].total_cmp(&ranks[x]))
+            let spared = |i: usize| kept[i] == earliest || kept[i] == broadest;
+            spared(y).cmp(&spared(x)).then(keys[y].total_cmp(&keys[x]))
         });
         let (keep, drop) = order.split_at(self.options.beam);
         let survivors: Vec<usize> = keep.iter().map(|&x| kept[x]).collect();
@@ -292,14 +286,16 @@ impl Search<'_> {
     }
 
     fn dominated(&self, label: &Label) -> bool {
-        self.kept[label.viewpoint].iter().any(|&i| dominates(&self.labels[i], label))
+        let finishes = self.problem.objective.finishes;
+        self.kept[label.viewpoint].iter().any(|&i| dominates(&self.labels[i], label, finishes))
     }
 
     fn evict_dominated_by(&mut self, label: &Label) {
+        let finishes = self.problem.objective.finishes;
         let labels = &mut self.labels;
         let mut killed = Vec::new();
         self.kept[label.viewpoint].retain(|&i| {
-            let beaten = dominates(label, &labels[i]);
+            let beaten = dominates(label, &labels[i], finishes);
             if beaten {
                 labels[i].kill();
                 killed.push(i);
@@ -387,24 +383,56 @@ impl Search<'_> {
         }
     }
 
-    /// Marginal value of one more sighting given what this label has already seen.
+    /// Marginal value of one more sighting given what this label has already seen; the last
+    /// racer to complete a set earns that set's bonus on top.
     fn gain(&self, label: &Label, sighting: &crate::viewpoints::Sighting) -> f64 {
         let priority = self.problem.priorities[sighting.racer];
-        let value = match sighting.kind {
-            Kind::Finish if !label.finished.contains(sighting.racer) => self.weights.finish,
-            Kind::Finish => 0.0,
-            Kind::Pass => {
-                let repeats = label.seen[sighting.racer] as i32;
-                self.weights.en_route * self.problem.objective.repeat_decay.powi(repeats)
+        let counts = priority > 0.0;
+        let w = &self.weights;
+        match sighting.kind {
+            Kind::Finish if label.finished.contains(sighting.racer) => 0.0,
+            Kind::Finish => {
+                let completes = counts && self.finished_of_field(label) + 1 == self.field.len();
+                priority * w.finish + if completes { w.everyone_finished } else { 0.0 }
             }
-        };
-        priority * value
+            Kind::Pass if label.seen[sighting.racer] > 0 => {
+                priority
+                    * w.repeat
+                    * self.problem.objective.repeat_decay.powi(label.seen[sighting.racer] as i32)
+            }
+            Kind::Pass => {
+                let completes = counts && self.seen_of_field(label) + 1 == self.field.len();
+                priority * w.first + if completes { w.everyone_seen } else { 0.0 }
+            }
+        }
+    }
+
+    fn seen_of_field(&self, label: &Label) -> usize {
+        self.field.iter().filter(|&&r| label.seen[r] > 0).count()
+    }
+
+    fn finished_of_field(&self, label: &Label) -> usize {
+        self.field.iter().filter(|&&r| label.finished.contains(r)).count()
     }
 
     /// Score with unmet required regions charged, which is what the plan is judged on.
+    /// Missing a region costs more than every level could earn.
     fn rank(&self, label: &Label) -> f64 {
         let unmet = (self.problem.regions.len() - label.regions_done.count_ones(..)) as f64;
-        label.score - self.weights.region_penalty * unmet
+        label.score - self.weights.everyone_seen * self.weights.level * unmet
+    }
+
+    /// What the beam keeps by: the rank plus credit for progress toward each completeness
+    /// bonus, so a label one racer short of seeing everyone is not squeezed out by one that
+    /// merely hoards finishes.
+    fn beam_key(&self, label: &Label) -> f64 {
+        let field = self.field.len() as f64;
+        let credit = |done: usize, bonus: f64| {
+            if (done as f64) < field { bonus * done as f64 / field } else { 0.0 }
+        };
+        self.rank(label)
+            + credit(self.seen_of_field(label), self.weights.everyone_seen)
+            + credit(self.finished_of_field(label), self.weights.everyone_finished)
     }
 
     fn best_plan(&self) -> Plan {
@@ -475,7 +503,13 @@ mod tests {
         Viewpoint { node, point: Point::new(node as f64, 0.0), arcs: Vec::new(), sightings }
     }
 
-    /// Viewpoints in a line, ten seconds apart, spectator starting at 0; two racers of equal priority.
+    /// Two racers of priority 1 at decay 0.5 give a level of 40.
+    const FIRST: f64 = 40.0;
+    const FINISH: f64 = 40.0 * 40.0;
+    const EVERYONE: f64 = 40.0 * 40.0 * 40.0 * 40.0;
+
+    /// Viewpoints in a line, ten seconds apart, spectator starting at 0; two racers of equal
+    /// priority, so repeats are worth 0.5, 0.25, … on top of the constants above.
     fn line(viewpoints: Vec<Viewpoint>) -> Problem {
         let n = viewpoints.len();
         let travel = (0..n)
@@ -512,7 +546,7 @@ mod tests {
             viewpoint(3, vec![sighting(0, 60.0, 65.0)]),
         ]);
         let plan = plan(&problem, Options::default());
-        assert_eq!(plan.score, 100.0 + 50.0 + 25.0);
+        assert_eq!(plan.score, FIRST + 0.5 + 0.25);
         let visited: Vec<usize> = plan.stops.iter().map(|s| s.viewpoint).collect();
         assert_eq!(visited, vec![0, 1, 2, 3]);
         assert_consistent(&plan, &problem);
@@ -530,20 +564,34 @@ mod tests {
             viewpoint(2, vec![sighting(1, 35.0, 40.0)]),
         ]);
         let plan = plan(&problem, Options::default());
-        assert_eq!(plan.score, 100.0 + 50.0 + 100.0);
+        assert_eq!(plan.score, EVERYONE + 2.0 * FIRST + 0.5);
         assert_eq!(plan.stops.last().unwrap().viewpoint, 2);
     }
 
     #[test]
-    fn tier_order_decides_repeat_versus_finish() {
+    fn a_finish_beats_a_repeat_unless_finishes_are_off() {
         let mut problem = line(vec![
             viewpoint(0, vec![]),
             viewpoint(1, vec![sighting(0, 10.0, 12.0), sighting(0, 30.0, 32.0)]),
             viewpoint(2, vec![finish(0, 25.0, 30.0)]),
         ]);
-        assert_eq!(plan(&problem, Options::default()).score, 100.0 + 50.0, "en-route tier first");
-        problem.objective.tiers = vec![Tier::Finish, Tier::EnRoute];
-        assert_eq!(plan(&problem, Options::default()).score, 1.0 + 100.0, "finish tier first");
+        assert_eq!(plan(&problem, Options::default()).score, FIRST + FINISH);
+        problem.objective.finishes = false;
+        assert_eq!(plan(&problem, Options::default()).score, FIRST + 0.5);
+    }
+
+    #[test]
+    fn completing_the_field_outweighs_any_finish() {
+        // Finishing racer 0 at 2 is worth 10 000; seeing racer 1 at 3 completes the field instead.
+        let problem = line(vec![
+            viewpoint(0, vec![]),
+            viewpoint(1, vec![sighting(0, 10.0, 12.0)]),
+            viewpoint(2, vec![finish(0, 25.0, 30.0)]),
+            viewpoint(3, vec![sighting(1, 35.0, 38.0)]),
+        ]);
+        let plan = plan(&problem, Options::default());
+        assert_eq!(plan.score, EVERYONE + 2.0 * FIRST);
+        assert_eq!(plan.stops.last().unwrap().viewpoint, 3);
     }
 
     #[test]
@@ -552,6 +600,30 @@ mod tests {
         let plan = plan(&problem, Options::default());
         assert_eq!(plan.stops.len(), 1);
         assert_eq!(plan.stops[0].sightings, vec![0]);
+    }
+
+    #[test]
+    fn a_narrow_beam_still_finds_the_whole_field() {
+        // Finishing racer 0 over and over out-scores seeing racer 1 until the field completes;
+        // the beam must keep the label that is one racer short of everyone.
+        let mut hub = vec![sighting(0, 10.0, 12.0)];
+        hub.extend((0..6).map(|i| finish(0, 20.0 + i as f64, 21.0 + i as f64)));
+        let problem = line(vec![
+            viewpoint(0, vec![]),
+            viewpoint(1, hub),
+            viewpoint(2, vec![sighting(1, 45.0, 46.0)]),
+        ]);
+        let plan = plan(&problem, Options { beam: 1, ..Options::default() });
+        assert!(plan.score >= EVERYONE, "{}", plan.score);
+    }
+
+    #[test]
+    fn zero_priority_racers_do_not_gate_everyone() {
+        let mut problem =
+            line(vec![viewpoint(0, vec![]), viewpoint(1, vec![sighting(0, 20.0, 25.0)])]);
+        problem.priorities[1] = 0.0;
+        let plan = plan(&problem, Options::default());
+        assert_eq!(plan.score, EVERYONE + FIRST);
     }
 
     #[test]
@@ -565,7 +637,7 @@ mod tests {
         let plan = plan(&problem, Options::default());
         assert_eq!(plan.stops.len(), 1);
         assert_eq!(plan.stops[0].viewpoint, 2);
-        assert_eq!(plan.score, 100.0);
+        assert_eq!(plan.score, FIRST);
     }
 
     #[test]
@@ -586,7 +658,7 @@ mod tests {
         problem.regions[0].latest = Some(1.0);
         let unmet = plan(&problem, Options::default());
         assert_eq!(unmet.unmet_regions, vec![0]);
-        assert_eq!(unmet.score, 200.0);
+        assert_eq!(unmet.score, EVERYONE + 2.0 * FIRST);
     }
 
     #[test]
@@ -601,7 +673,7 @@ mod tests {
         problem.regions.push(Region { inside, latest: None });
         let plan = plan(&problem, Options::default());
         assert!(plan.unmet_regions.is_empty());
-        assert_eq!(plan.score, 200.0);
+        assert_eq!(plan.score, EVERYONE + 2.0 * FIRST);
         assert_eq!(plan.stops.last().unwrap().viewpoint, 2);
     }
 
@@ -623,7 +695,7 @@ mod tests {
         ]);
         problem.end = Some((0, 60.0));
         let anchored = plan(&problem, Options::default());
-        assert_eq!(anchored.score, 100.0);
+        assert_eq!(anchored.score, FIRST);
         assert_eq!(
             anchored.stops.last().unwrap(),
             &Stop { viewpoint: 0, arrive: 35.0, depart: 35.0, sightings: vec![] }
@@ -632,7 +704,7 @@ mod tests {
 
         problem.end = None;
         problem.latest = Some(50.0);
-        assert_eq!(plan(&problem, Options::default()).score, 100.0);
+        assert_eq!(plan(&problem, Options::default()).score, FIRST);
     }
 
     #[test]
@@ -647,7 +719,7 @@ mod tests {
     #[test]
     fn zero_length_windows_terminate() {
         let problem = line(vec![viewpoint(0, vec![]), viewpoint(1, vec![sighting(0, 20.0, 20.0)])]);
-        assert_eq!(plan(&problem, Options::default()).score, 100.0);
+        assert_eq!(plan(&problem, Options::default()).score, FIRST);
     }
 
     #[test]
@@ -660,6 +732,6 @@ mod tests {
             viewpoint(2, vec![sighting(1, 25.0, 26.0)]),
         ]);
         let plan = plan(&problem, Options { beam: 1, ..Options::default() });
-        assert_eq!(plan.score, 200.0);
+        assert_eq!(plan.score, EVERYONE + 2.0 * FIRST);
     }
 }

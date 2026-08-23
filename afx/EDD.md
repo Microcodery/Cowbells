@@ -145,8 +145,8 @@ trait TravelTime {
 
 1. **Sample the course** every 20 m along viewable segments, recording distance-along-course.
 2. **Densify the spectator network** near the course (`Graph::densify_near`): edges within the sighting radius are split into ≤20 m pieces so viewpoints can sit mid-block, not only at intersections.
-3. **Clear the roadway** (`Graph::clear_roadways`): OSM road centrelines carry both the race route and the walkable way, so edges whose ends both lie within 6 m of a course are removed. The spectator walks sidewalks (where OSM maps them), parallel streets, and park paths, and crosses the course only on cross streets (never, if `course_closed`).
-4. **Spatial join**: for every graph node, the course samples within `sighting_radius` (r-tree). Nodes with none are discarded, as are nodes within 6 m of a course — a spectator stands beside the road, not in it.
+3. **Clear the roadway** (`Graph::clear_roadways`): OSM road centrelines carry both the race route and the walkable way, so edges whose ends both lie within 3 m of a course are removed (sidewalks mapped as their own ways sit 3–6 m out and survive). The spectator walks sidewalks (where OSM maps them), parallel streets, and park paths, and crosses the course only on cross streets (never, if `course_closed`).
+4. **Spatial join**: for every graph node, the course samples within `sighting_radius` (r-tree). Nodes with none are discarded, as are nodes within 6 m of a course — a spectator stands beside the road, not in it, and a sidewalk node hugging the course would win clustering yet often be reachable only via the nearest mapped crossing.
 5. **Coverage arcs**: per course, contiguous runs of matched samples become `Arc { start_m, end_m, mean_view_m, finish }`. Multi-lap courses yield several arcs per node.
 6. **Cluster**: viewpoints are ranked by arc width then view distance; one within `viewpoint_spacing_m` (default 120 m, about a minute's walk) of a kept viewpoint that sees no course the kept one misses is dropped — its windows differ by less than the safety buffer, so it cannot change the plan. Spots where another course comes into view survive. Search cost scales with viewpoints², so this spacing is the main performance dial.
 7. **Windows**: for each racer on the arc's course, `Trajectory::window(arc.start, arc.end, safety_buffer)` gives `[entry_earliest − buffer, exit_latest]`; `expected` is the mid-arc expected time.
@@ -162,7 +162,7 @@ Orienteering problem with time windows (OPTW) on the viewpoint set: choose an or
 - dwell at each stop ≥ `min_stop_s`;
 - begin at the start anchor (or anywhere, if none) no earlier than `earliest`; finish by `latest`; end at the end anchor no later than its deadline if given.
 
-**Objective (ALGORITHM.md §5.1–5.3).** Two tiers in a configurable order, default `EnRoute` then `Finish`. Each tier's weight is a power of a *base* chosen so that one tier outweighs everything the tiers below it could accumulate for this field (base = the next power of ten above `racers × max_priority × Σ decay^k`), which keeps the scalar lexicographic at any field size. Within `EnRoute` each racer has a concave value curve: the *k*-th sighting is worth `priority × W_enroute × repeat_decay^(k−1)`, so `repeat_decay` is the breadth↔depth dial (0: only first sightings count; 1: repeats count fully). `Finish` pays `priority × W_finish` once per racer. A required region that no stop falls inside by its `latest` costs `base × W_top` — soft, so an unreachable region still yields a plan — and that penalty is part of the score the beam ranks by.
+**Objective (ALGORITHM.md §5.1–5.3).** Five levels in strict priority: (1) every racer seen en route, (2) every racer's finish seen, (3) each finish, (4) each racer's first en-route sighting, (5) repeat en-route sightings. Levels 1 and 2 are completeness bonuses earned by the sighting that completes the set; 3 and 4 pay per racer, scaled by priority; level 5 follows a concave curve — the *k*-th repeat is worth `priority × repeat_decay^k`, so `repeat_decay` is the breadth↔depth dial (0: only first sightings count; 1: repeats count fully). Each level's weight is a power of a *base* chosen so that it outweighs everything the levels below it could accumulate for this field (base = the next power of ten above `racers × max_priority × Σ decay^k`), which keeps the scalar lexicographic at any field size. `finishes: false` zeroes levels 2 and 3. A required region that no stop falls inside by its `latest` costs `base × W_1` — soft, so an unreachable region still yields a plan — and that penalty is part of the score the beam ranks by.
 
 A window is *covered* by a dwell `[a, b]` at its viewpoint iff `a ≤ t_open` and `b ≥ t_close`. Because windows are fixed intervals, the dwell at a stop is determined by which windows it chooses to cover; the planner reasons in terms of windows, not free-form dwell times.
 
@@ -185,7 +185,7 @@ The literature's standard for this exact variant (MC-TOP-MTW) is greedy insertio
 
 ### 5.4 Extension points
 
-The objective lives in `core::Objective` (tiers + decay) and the marginal-gain function in the planner; new tiers ("see X at least k times", groups) add a tier variant and, if they need history, a field in the label and a clause in `dominates`.
+The objective lives in `core::Objective` (levels resolved to `Weights`) and the marginal-gain function in the planner; new levels ("see X at least k times", groups) add a weight and, if they need history, a field in the label and a clause in `dominates`.
 
 ### 5.5 Output
 

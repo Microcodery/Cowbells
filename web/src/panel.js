@@ -13,6 +13,7 @@ export function renderPanel(root, event, ui, actions) {
   // Rebuilding the markup must not move the user: keep open sections open and the scroll where it was.
   const folds = new Map([...root.querySelectorAll("details[data-section]")].map((d) => [d.dataset.section, d.open]));
   const scroll = root.scrollTop;
+  const focused = root.contains(document.activeElement) ? selectorFor(document.activeElement) : null;
   root.innerHTML = `
     <header>
       <h1>birdeye</h1>
@@ -20,7 +21,8 @@ export function renderPanel(root, event, ui, actions) {
         <select data-act="example" ${ui.busy ? "disabled" : ""}>
           <option value="">Examples…</option>
           <option value="downtown-loop">Downtown loop</option>
-          <option value="hawthorne-3-distance">Three distances</option>
+          <option value="three-distances">5K · 10K · half marathon</option>
+          <option value="hawthorne-belmont">Out-and-back, six racers</option>
         </select>
         <button data-act="save" title="Save event as .bird">Save</button>
         <label class="button" title="Load a .bird event">Load<input type="file" accept=".bird,.json" data-act="load" hidden ${ui.busy ? "disabled" : ""}></label>
@@ -43,12 +45,13 @@ export function renderPanel(root, event, ui, actions) {
         <button data-act="plan" ${ui.busy || !ui.network ? "disabled" : ""}>Plan</button>
       </div>
       <p class="muted"><span data-status>${esc(ui.status)}</span> ${ui.replaying ? `<button data-act="skipReplay">Skip</button>` : ""}</p>
-      ${ui.itinerary ? results(ui.itinerary, event) : ""}
+      ${ui.itinerary ? results(ui.itinerary, event, ui) : ""}
     </section>`;
   for (const details of root.querySelectorAll("details[data-section]")) {
     if (folds.has(details.dataset.section)) details.open = folds.get(details.dataset.section);
   }
   root.scrollTop = scroll;
+  if (focused) root.querySelector(focused)?.focus({ preventScroll: true });
 
   root.onclick = (e) => {
     const target = e.target.closest("[data-act]");
@@ -176,14 +179,15 @@ function settingsSection(event, ui) {
       <label>safety buffer <input type="number" data-field="buffer" value="${s.safety_buffer_s / 60}" min="0" step="0.5" size="3"> min</label>
       <label>min stop <input type="number" data-field="minStop" value="${s.min_stop_s / 60}" min="0" size="3"> min</label>
       <label>viewpoint spacing <input type="number" data-field="spacing" value="${s.viewpoint_spacing_m ?? 120}" min="20" step="10" size="4" title="spots closer than this that see the same courses merge"> m</label>
-      <label>breadth ↔ depth <input type="range" data-field="decay" value="${s.objective.repeat_decay}" min="0" max="1" step="0.1" title="How much each repeat sighting of a racer is worth relative to the previous one"></label>
+      <label><input type="checkbox" data-field="finishes" ${s.objective.finishes === false ? "" : "checked"}> see finishes <span class="muted" title="Priorities: everyone en route, then everyone's finish, then each finish, then each first sighting, then repeats">?</span></label>
+      <label>breadth ↔ depth <input type="range" data-field="decay" value="${s.objective.repeat_decay}" min="0" max="0.9" step="0.1" title="How much each repeat sighting of a racer is worth relative to the previous one"></label>
       <label><input type="checkbox" data-field="courseClosed" ${s.course_closed ? "checked" : ""}> course closed to crossing</label>
       <label>search effort <select data-field="beam">${options(["16", "64", "256"], String(ui.beam))}</select></label>
       <label>replay length <input type="range" data-field="replaySeconds" value="${ui.replaySeconds}" min="1" max="60" step="1" title="seconds to animate the planner's steps after each plan; click the map to skip"> ${ui.replaySeconds}s</label>
   </details>`;
 }
 
-function results(itinerary, event) {
+function results(itinerary, event, ui) {
   const name = (id) => event.racers.find((r) => r.id === id)?.name ?? id;
   const stops = itinerary.stops
     .map((stop, i) => {
@@ -191,16 +195,35 @@ function results(itinerary, event) {
       const when = label === "Start" ? state.clock(stop.depart) : `${state.clock(stop.arrive)}–${state.clock(stop.depart)}`;
       return `<li data-act="flyTo" data-stop="${i}">
       <b>${label}</b> ${when}
-      <ul>${state.visibleSightings(stop).map((s) => `<li>${esc(name(s.racer_id))} <span class="muted">${s.kind} ~${state.clock(s.expected)}</span></li>`).join("")}</ul>
+      <ul>${stop.seen.map((s) => `<li>${esc(name(s.racer_id))} <span class="muted">${s.kind} ~${state.clock(s.expected)}</span></li>`).join("")}</ul>
       ${itinerary.legs[i] ? `<p class="muted">→ ${Math.round(itinerary.legs[i].seconds / 60)} min</p>` : ""}
     </li>`;
     })
     .join("");
   const unseen = itinerary.unseen.length ? `<p class="warn">Never seen: ${itinerary.unseen.map(name).map(esc).join(", ")}</p>` : "";
   const unmet = itinerary.unmet_regions.length ? `<p class="warn">Could not visit area ${itinerary.unmet_regions.map((i) => i + 1).join(", ")}</p>` : "";
-  const sightings = itinerary.stops.reduce((n, s) => n + state.visibleSightings(s).length, 0);
-  return `<p>${sightings} sightings, score ${Math.round(itinerary.score)} <button data-act="exportGpx">Export GPX</button></p>
-    <ol class="stops">${stops}</ol>${unseen}${unmet}`;
+  return `<p>${state.planSummary(event, itinerary)} <button data-act="exportGpx">Export GPX</button></p>
+    <ol class="stops">${stops}</ol>${unseen}${unmet}${alternatives(ui)}`;
+}
+
+/** Looser settings that would do clearly better, once the background search has tried them. */
+function alternatives(ui) {
+  if (ui.alternatives === null) return `<p class="muted">Trying looser settings…</p>`;
+  if (ui.alternatives.length === 0) return "";
+  const items = ui.alternatives
+    .map(
+      ({ alt, variant, itinerary }, i) =>
+        `<li>With ${esc(alt.label)}: ${state.planSummary(variant, itinerary)} <button data-act="useAlternative" data-alt="${i}" ${ui.busy ? "disabled" : ""}>Use</button></li>`,
+    )
+    .join("");
+  return `<p>Better plans are possible:</p><ul class="alternatives">${items}</ul>`;
+}
+
+/** A selector that finds the same control again after the markup is rebuilt, or null for anonymous ones. */
+function selectorFor(element) {
+  const keys = Object.keys(element.dataset ?? {});
+  if (!keys.length) return null;
+  return keys.map((k) => `[data-${k.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`)}="${element.dataset[k]}"]`).join("");
 }
 
 const toolButton = (act, active, idle, working, extra = "") =>

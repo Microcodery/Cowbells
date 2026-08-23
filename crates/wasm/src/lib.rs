@@ -2,7 +2,7 @@
 
 use birdeye_core::geom::{Point, Projection};
 use birdeye_core::{Event, TravelMode};
-use birdeye_plan::{Options, ROADWAY_M};
+use birdeye_plan::Options;
 use birdeye_routing::profile::default_speed;
 use birdeye_routing::{Graph, Osm, TravelTime};
 use serde::Deserialize;
@@ -10,6 +10,9 @@ use wasm_bindgen::prelude::*;
 
 /// Spectator edges this close to a course are split so viewpoints can sit mid-block.
 const DENSIFY_SPACING_M: f64 = 20.0;
+/// Edges with both ends this close to a course run along it; sidewalks mapped as their own
+/// ways sit 3–6 m out and stay walkable.
+const ROADWAY_M: f64 = 3.0;
 
 #[wasm_bindgen]
 pub fn ping(msg: &str) -> String {
@@ -84,6 +87,10 @@ impl Network {
         let courses: Vec<_> = event.courses.iter().flat_map(|c| c.polylines(&projection)).collect();
         let course_points: Vec<Point> = courses.iter().flat_map(samples_along).collect();
         let mut graph = self.graph.clone();
+        // Scale before densifying so the split edges inherit the scaled times.
+        if let Some(factor) = options.speed_factor.filter(|f| *f > 0.0 && f.is_finite()) {
+            graph.scale_speed(factor);
+        }
         graph.densify_near(&course_points, event.spectator.sighting_radius_m, DENSIFY_SPACING_M);
         graph.clear_roadways(&courses, ROADWAY_M);
         if event.spectator.course_closed {
@@ -110,6 +117,9 @@ struct PlanOptions {
     beam: usize,
     #[serde(default)]
     trace: bool,
+    /// Plan as if the spectator moved this many times faster than the network was built for.
+    #[serde(default)]
+    speed_factor: Option<f64>,
 }
 
 fn default_beam() -> usize {

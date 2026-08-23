@@ -199,6 +199,13 @@ impl Graph {
         }
     }
 
+    /// Every edge takes `1 / factor` as long: the spectator moving `factor` times faster.
+    pub fn scale_speed(&mut self, factor: f64) {
+        for edge in self.edges.iter_mut().flatten() {
+            edge.seconds /= factor;
+        }
+    }
+
     /// Drop edges running along a course: the roadway belongs to the racers, so the spectator
     /// keeps to sidewalks and other streets. Edges that merely touch or cross the course survive.
     pub fn clear_roadways(&mut self, courses: &[Polyline], width: f64) {
@@ -433,6 +440,13 @@ mod tests {
         g.close_courses(&[course]);
         assert_eq!(g.time(0, 2), None);
         assert_eq!(g.time(0, 6), Some(2.0));
+    }
+
+    #[test]
+    fn scaling_speed_shortens_every_edge() {
+        let mut g = lattice();
+        g.scale_speed(2.0);
+        assert_eq!(g.time(0, 2), Some(1.0));
     }
 
     #[test]

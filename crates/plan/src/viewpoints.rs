@@ -11,8 +11,10 @@ use serde::Serialize;
 
 /// Course points are sampled this often along viewable segments.
 const SAMPLE_SPACING_M: f64 = 20.0;
-/// Network nodes closer than this to a course are in the roadway, not beside it.
-pub const ROADWAY_M: f64 = 6.0;
+/// Nodes closer than this to a course are not viewpoints. Wider than the roadway itself: a
+/// sidewalk node hugging the course sees it best, but is often reachable only via the nearest
+/// mapped crossing, so the corner spot it would displace in clustering makes the better stop.
+const CLEARANCE_M: f64 = 6.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -80,8 +82,9 @@ pub fn raw_viewpoints(
     let (samples, index) = sample_courses(event, projection);
     let courses: Vec<Vec<Polyline>> =
         event.courses.iter().map(|c| c.polylines(projection)).collect();
-    let in_roadway =
-        |point: Point| courses.iter().flatten().any(|line| line.nearest(point).offset < ROADWAY_M);
+    let in_roadway = |point: Point| {
+        courses.iter().flatten().any(|line| line.nearest(point).offset < CLEARANCE_M)
+    };
     let radius = event.spectator.sighting_radius_m;
     (0..graph.node_count())
         .filter_map(|node| {
@@ -106,6 +109,7 @@ pub fn raw_viewpoints(
 
 /// Each racer's visibility window at every arc of every viewpoint.
 pub fn add_sightings(viewpoints: &mut [Viewpoint], event: &Event) {
+    let finishes = event.spectator.objective.finishes;
     let trajectories: Vec<(usize, Trajectory)> = event
         .racers
         .iter()
@@ -118,8 +122,9 @@ pub fn add_sightings(viewpoints: &mut [Viewpoint], event: &Event) {
         .collect();
     for viewpoint in viewpoints.iter_mut() {
         for (racer, (course, trajectory)) in trajectories.iter().enumerate() {
-            for arc in viewpoint.arcs.iter().filter(|a| a.course == *course) {
-                let pass = Sighting {
+            let wanted = |a: &&Arc| a.course == *course && (finishes || !a.finish);
+            for arc in viewpoint.arcs.iter().filter(wanted) {
+                viewpoint.sightings.push(Sighting {
                     racer,
                     window: trajectory.window(
                         arc.start_m,
@@ -127,13 +132,8 @@ pub fn add_sightings(viewpoints: &mut [Viewpoint], event: &Event) {
                         event.spectator.safety_buffer_s,
                     ),
                     expected: trajectory.expected_at((arc.start_m + arc.end_m) / 2.0),
-                    kind: Kind::Pass,
-                };
-                // The finish line is also a stretch of course: it pays as a pass and as a finish.
-                if arc.finish {
-                    viewpoint.sightings.push(Sighting { kind: Kind::Finish, ..pass.clone() });
-                }
-                viewpoint.sightings.push(pass);
+                    kind: if arc.finish { Kind::Finish } else { Kind::Pass },
+                });
             }
         }
         viewpoint.sightings.sort_by(|a, b| a.window.open.total_cmp(&b.window.open));

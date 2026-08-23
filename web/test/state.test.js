@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { itineraryToGpx } from "../src/gpx.js";
-import { newEvent, rebase, stopLabel, visibleSightings } from "../src/state.js";
+import { newEvent, rebase, stopLabel } from "../src/state.js";
 
 const stop = (seen) => ({ location: { lat: 1, lon: 2 }, arrive: 100, depart: 200, seen });
 const sighting = (racer_id, kind, expected) => ({ racer_id, kind, expected, open: 0, close: 0 });
@@ -28,13 +28,6 @@ describe("stopLabel", () => {
   it("names the anchor and numbers from there", () => {
     expect([0, 1, 2].map((i) => stopLabel(anchored, i))).toEqual(["Start", 1, 2]);
     expect([0, 1].map((i) => stopLabel(free, i))).toEqual([1, 2]);
-  });
-});
-
-describe("visibleSightings", () => {
-  it("shows a finish once, keeping other passes", () => {
-    const s = stop([sighting("a", "pass", 50), sighting("a", "finish", 50), sighting("a", "pass", 20), sighting("b", "pass", 50)]);
-    expect(visibleSightings(s).map((x) => `${x.racer_id}:${x.kind}`)).toEqual(["a:finish", "a:pass", "b:pass"]);
   });
 });
 

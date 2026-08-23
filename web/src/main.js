@@ -25,7 +25,10 @@ const ui = {
   replaySeconds: 6,
   replaying: null,
   unit: state.UNITS[localStorage.getItem(UNITS_KEY)] ?? state.UNITS.km,
+  // `null` while alternatives are still being explored; then the ones that beat the plan.
+  alternatives: null,
 };
+let planGeneration = 0;
 
 let event = loadSaved() ?? state.newEvent(DEFAULT_CENTER);
 const map = createMap("map", event.origin, onMapClick);
@@ -49,12 +52,19 @@ function loadSaved() {
   }
 }
 
-/** Apply an edit to the event; any plan is stale afterwards. */
+/** Apply an edit to the event; any plan, and any search for alternatives to it, is stale afterwards. */
 function mutate(edit) {
   edit();
   state.reconcileProfiles(event);
   ui.itinerary = null;
+  planGeneration++;
   draw();
+}
+
+/** The network depends on mode and speed; rebuild it from the cached map data rather than refetching. */
+function rebuildNetwork() {
+  ui.network = null;
+  if (ui.osm) run("Rebuilding network…", async () => (ui.status = await buildNetwork()));
 }
 
 function onMapClick(latlon) {
@@ -232,6 +242,7 @@ const actions = {
     });
   },
   async plan() {
+    let planned = false;
     await run("Planning…", async () => {
       const problems = await engine.call("validate", { event });
       if (problems.length) throw new Error(problems.join("; "));
@@ -240,9 +251,22 @@ const actions = {
       revealItinerary(map, false);
       await replayTrace(trace);
       ui.itinerary = itinerary;
-      ui.status = `Score ${Math.round(itinerary.score)}.`;
+      ui.alternatives = null;
+      ui.status = `${state.planSummary(event, itinerary)}.`;
+      planned = true;
       draw();
       requestAnimationFrame(() => revealItinerary(map, true));
+    });
+    if (planned) exploreAlternatives(++planGeneration).catch((err) => console.error("alternatives", err));
+  },
+  async useAlternative({ alt }) {
+    const { variant, itinerary } = ui.alternatives[Number(alt)];
+    await run("Switching…", async () => {
+      event.spectator = variant.spectator;
+      ui.itinerary = itinerary;
+      // Already loosened once; offering further loosening would chase diminishing returns.
+      ui.alternatives = [];
+      ui.status = `${state.planSummary(event, itinerary)}. ${await buildNetwork()}`;
     });
   },
   skipReplay() {
@@ -272,11 +296,11 @@ const actions = {
       travel: () => {
         s.mode = input.value;
         s.speed_mps = null;
-        ui.network = null;
+        rebuildNetwork();
       },
       speed: () => {
         s.speed_mps = input.value ? number / ui.unit.speedPerMps : null;
-        ui.network = null;
+        rebuildNetwork();
       },
       radius: () => (s.sighting_radius_m = number),
       skipStart: () => (s.skip_start_m = number / ui.unit.perMetre),
@@ -284,6 +308,7 @@ const actions = {
       minStop: () => (s.min_stop_s = number * 60),
       spacing: () => (s.viewpoint_spacing_m = number),
       decay: () => (s.objective.repeat_decay = number),
+      finishes: () => (s.objective.finishes = input.checked),
       courseClosed: () => (s.course_closed = input.checked),
       beam: () => (ui.beam = number),
       replaySeconds: () => (ui.replaySeconds = number),
@@ -291,6 +316,31 @@ const actions = {
     mutate(() => edits[field]?.());
   },
 };
+
+/** Tries looser settings after a plan and offers any that do clearly better; stops if a newer plan starts. */
+async function exploreAlternatives(generation) {
+  if (!ui.itinerary) return;
+  const snapshot = structuredClone(event);
+  const finishes = snapshot.spectator.objective.finishes !== false;
+  const base = state.planLevels(snapshot, ui.itinerary);
+  const options = { beam: ui.beam, trace: false };
+  const found = [];
+  for (const alt of state.ALTERNATIVES) {
+    if (alt.when && !alt.when(snapshot.spectator)) continue;
+    const variant = state.alternativeEvent(snapshot, alt);
+    try {
+      // The network was built at the current speed; a faster variant scales its times instead of rebuilding.
+      const { itinerary } = await engine.call("plan", { event: variant, options: { ...options, speed_factor: alt.speedFactor } });
+      if (generation !== planGeneration) return;
+      if (state.betterPlan(state.planLevels(variant, itinerary), base, finishes)) found.push({ alt, variant, itinerary });
+    } catch {
+      // A variant that cannot be planned is simply not offered.
+    }
+  }
+  if (generation !== planGeneration) return;
+  ui.alternatives = found;
+  draw();
+}
 
 async function replayTrace(trace) {
   ui.replaying = { skip: false };

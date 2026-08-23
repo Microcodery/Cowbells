@@ -4,7 +4,7 @@ const DEFAULT_PACE_S_PER_KM = { run: 360, bike: 100, swim: 1200, other: 360 };
 const DEFAULT_UNCERTAINTY = 0.05;
 const DEFAULT_REGION_RADIUS_M = 100;
 /** Typical speeds per travel mode, matching the routing profiles; shown when the spectator sets none. */
-export const DEFAULT_SPEED_MPS = { walk: 1.3, bike: 4.5 };
+export const DEFAULT_SPEED_MPS = { walk: 1.3, bike: 4.5, drive: 13.9 };
 
 /** Display units; the event itself is always metric. */
 export const UNITS = {
@@ -40,7 +40,7 @@ export function newEvent(center) {
       viewpoint_spacing_m: 120,
       course_closed: false,
       required_regions: [],
-      objective: { tiers: ["en_route", "finish"], repeat_decay: 0.5 },
+      objective: { finishes: true, repeat_decay: 0.5 },
     },
   };
 }
@@ -214,12 +214,6 @@ export function stopLabel(event, index) {
 }
 
 /** A finish counts as a pass too; list it once, as the finish. */
-export function visibleSightings(stop) {
-  const key = (s) => `${s.racer_id}@${s.expected}`;
-  const finishKeys = new Set(stop.seen.filter((s) => s.kind === "finish").map(key));
-  return stop.seen.filter((s) => s.kind === "finish" || !finishKeys.has(key(s)));
-}
-
 export function todayAt(hhmm) {
   const [h, m] = hhmm.split(":").map(Number);
   const d = new Date();
@@ -260,6 +254,61 @@ export function parsePace(text, unit = UNITS.km) {
   if (!match) return null;
   const seconds = Number(match[1]) * 60 + Number(match[2] ?? 0);
   return seconds > 0 ? seconds / kmPerUnit(unit) : null;
+}
+
+/** How far the plan gets on each objective level: racers seen en route, racers finished, sightings. */
+export function planLevels(event, itinerary) {
+  const seen = new Set();
+  const finished = new Set();
+  let sightings = 0;
+  for (const stop of itinerary.stops) {
+    for (const s of stop.seen) {
+      sightings += 1;
+      (s.kind === "finish" ? finished : seen).add(s.racer_id);
+    }
+  }
+  return { racers: event.racers.length, seen: seen.size, finished: finished.size, sightings };
+}
+
+/** "Seen en route 2/3 · finishes 3/3 · 7 sightings". */
+export function planSummary(event, itinerary) {
+  const { racers, seen, finished, sightings } = planLevels(event, itinerary);
+  const finishes = event.spectator.objective.finishes === false ? "" : ` · finishes ${finished}/${racers}`;
+  return `Seen en route ${seen}/${racers}${finishes} · ${sightings} sighting${sightings === 1 ? "" : "s"}`;
+}
+
+/** Whether `a` beats `b` on the levels that matter most: completeness first, then counts. */
+export function betterPlan(a, b, finishes = true) {
+  const key = (l) => [l.seen === l.racers, finishes && l.finished === l.racers, finishes ? l.finished : 0, l.seen].map(Number);
+  const [ka, kb] = [key(a), key(b)];
+  const i = ka.findIndex((v, i) => v !== kb[i]);
+  return i >= 0 && ka[i] > kb[i];
+}
+
+/** Looser constraints worth trying in the background once a plan is shown. */
+const selfPowered = (s) => s.mode !== "drive";
+export const ALTERNATIVES = [
+  { label: "moving 25% faster", speedFactor: 1.25, when: selfPowered },
+  { label: "a half-length safety buffer", adjust: (s) => (s.safety_buffer_s /= 2) },
+  { label: "no minimum stop", adjust: (s) => (s.min_stop_s = 0), when: (s) => s.min_stop_s > 0 },
+  {
+    label: "all of those",
+    speedFactor: 1.25,
+    when: selfPowered,
+    adjust: (s) => {
+      s.safety_buffer_s /= 2;
+      s.min_stop_s = 0;
+    },
+  },
+];
+
+/** A copy of the event with one alternative's looser settings applied. */
+export function alternativeEvent(event, alt) {
+  const variant = structuredClone(event);
+  const s = variant.spectator;
+  if (alt.speedFactor) s.speed_mps = (s.speed_mps ?? DEFAULT_SPEED_MPS[s.mode]) * alt.speedFactor;
+  alt.adjust?.(s);
+  return variant;
 }
 
 export function looksLikeEvent(value) {

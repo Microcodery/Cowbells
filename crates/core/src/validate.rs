@@ -30,9 +30,7 @@ pub enum ValidationError {
     Uncertainty { racer: String, index: usize },
     #[error("racer {racer} priority must be zero or more")]
     Priority { racer: String },
-    #[error("objective tiers must be non-empty and distinct")]
-    Tiers,
-    #[error("repeat decay must be in [0, 1]")]
+    #[error("repeat decay must be in [0, 1)")]
     RepeatDecay,
     #[error("the day must end after it starts")]
     DayWindow,
@@ -60,12 +58,7 @@ impl Event {
 }
 
 fn check_spectator(spectator: &SpectatorConfig, errors: &mut Vec<ValidationError>) {
-    let tiers = &spectator.objective.tiers;
-    let distinct = tiers.iter().collect::<HashSet<_>>().len() == tiers.len();
-    if tiers.is_empty() || !distinct {
-        errors.push(ValidationError::Tiers);
-    }
-    if !(0.0..=1.0).contains(&spectator.objective.repeat_decay) {
+    if !(0.0..1.0).contains(&spectator.objective.repeat_decay) {
         errors.push(ValidationError::RepeatDecay);
     }
     let ends = spectator.latest.into_iter().chain(spectator.end.map(|e| e.latest));
@@ -268,7 +261,6 @@ mod tests {
     fn spectator_settings_are_checked() {
         let mut e =
             event(vec![segment("a", &[0.0, 1.0])], vec![interval(0.0, 1000.0, 300.0, 0.05)], "c");
-        e.spectator.objective.tiers = vec![Tier::Finish, Tier::Finish];
         e.spectator.objective.repeat_decay = 1.5;
         e.spectator.latest = Some(-1);
         e.spectator.speed_mps = Some(0.0);
@@ -276,7 +268,6 @@ mod tests {
         assert_eq!(
             e.validate(),
             Err(vec![
-                ValidationError::Tiers,
                 ValidationError::RepeatDecay,
                 ValidationError::DayWindow,
                 ValidationError::Speed,

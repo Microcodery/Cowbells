@@ -144,43 +144,66 @@ pub struct RequiredRegion {
     pub latest: Option<Timestamp>,
 }
 
-/// What "racers seen" means: ordered tiers, each worth more than everything below it combined.
+/// What a plan is worth, in strict priority: everyone seen en route, then everyone's finish,
+/// then each finish, then each racer's first en-route sighting, then repeats on a decaying curve.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Objective {
-    pub tiers: Vec<Tier>,
+    /// Whether finishes count at all.
+    #[serde(default = "default_true")]
+    pub finishes: bool,
     /// Each repeat en-route sighting of a racer is worth this fraction of the previous one:
-    /// 0 is pure breadth (see everybody once), 1 is pure depth (repeats count fully).
+    /// 0 is pure breadth (see everybody once), 0.9 is nearly pure depth. Must stay below 1 so
+    /// repeats can never add up to a first sighting.
     pub repeat_decay: f64,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Tier {
-    /// En-route sightings, on the per-racer value curve.
-    EnRoute,
-    Finish,
 }
 
 impl Default for Objective {
     fn default() -> Self {
-        Self { tiers: vec![Tier::EnRoute, Tier::Finish], repeat_decay: 0.5 }
+        Self { finishes: true, repeat_decay: 0.5 }
     }
 }
 
+/// Objective weights resolved for a field of racers; each level outweighs everything the
+/// levels below it could accumulate, so the scalar score ranks plans lexicographically.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Weights {
+    /// Bonus once every racer has been seen en route.
+    pub everyone_seen: f64,
+    /// Bonus once every racer's finish has been seen.
+    pub everyone_finished: f64,
+    /// Each racer's finish, scaled by priority.
+    pub finish: f64,
+    /// Each racer's first en-route sighting, scaled by priority.
+    pub first: f64,
+    /// The `k`-th en-route sighting of a racer is worth `priority × repeat_decay^k` of this.
+    pub repeat: f64,
+    /// One level's worth; anything that must beat every level costs a multiple of `everyone_seen`.
+    pub level: f64,
+}
+
 impl Objective {
-    /// Tier weights that behave lexicographically for a field of `racers` with the given
-    /// `max_priority`: each tier outweighs everything the tiers below it could accumulate.
-    pub fn weight(&self, tier: Tier, racers: usize, max_priority: f64) -> f64 {
-        let Some(i) = self.tiers.iter().position(|&t| t == tier) else { return 0.0 };
-        self.tier_base(racers, max_priority).powi((self.tiers.len() - 1 - i) as i32)
+    pub fn weights(&self, racers: usize, max_priority: f64) -> Weights {
+        let level = self.level_base(racers, max_priority);
+        // Without finishes the two finish levels vanish and everyone-seen sits right above firsts.
+        let (everyone_seen, everyone_finished, finish) = if self.finishes {
+            (level.powi(4), level.powi(3), level.powi(2))
+        } else {
+            (level.powi(2), 0.0, 0.0)
+        };
+        Weights { everyone_seen, everyone_finished, finish, first: level, repeat: 1.0, level }
     }
 
-    /// The most a single tier can be worth, rounded up to a power of ten.
-    pub fn tier_base(&self, racers: usize, max_priority: f64) -> f64 {
-        let repeats = if self.repeat_decay >= 1.0 { 10.0 } else { 1.0 / (1.0 - self.repeat_decay) };
+    /// Ten times the most a single level can be worth, so the scalar stays exact in f64 for
+    /// fields of hundreds of racers.
+    pub fn level_base(&self, racers: usize, max_priority: f64) -> f64 {
+        let repeats = 1.0 / (1.0 - self.repeat_decay.clamp(0.0, 0.9));
         let most = (racers.max(1) as f64 * max_priority.max(1.0) * repeats).max(1.0);
-        10f64.powi(most.log10().ceil() as i32 + 1)
+        (10.0 * most).ceil()
     }
+}
+
+fn default_true() -> bool {
+    true
 }
 
 fn default_viewable() -> bool {
@@ -238,13 +261,20 @@ mod tests {
         assert_eq!(event.spectator.start, None);
         let objective = &event.spectator.objective;
         assert_eq!(
-            objective.tier_base(1, 1.0),
-            100.0,
-            "one racer, decay 0.5: at most 2 points per tier"
+            objective.level_base(1, 1.0),
+            20.0,
+            "one racer, decay 0.5: at most 2 points per level, times ten"
         );
-        assert_eq!(objective.weight(Tier::EnRoute, 1, 1.0), 100.0);
-        assert_eq!(objective.weight(Tier::Finish, 1, 1.0), 1.0);
-        assert_eq!(objective.tier_base(30, 1.0), 1000.0);
+        let weights = objective.weights(1, 1.0);
+        assert_eq!(weights.everyone_seen, 160_000.0);
+        assert_eq!(weights.everyone_finished, 8_000.0);
+        assert_eq!(weights.finish, 400.0);
+        assert_eq!(weights.first, 20.0);
+        assert_eq!(weights.repeat, 1.0);
+        let no_finishes = Objective { finishes: false, ..objective.clone() }.weights(1, 1.0);
+        assert_eq!((no_finishes.finish, no_finishes.everyone_finished), (0.0, 0.0));
+        assert_eq!(no_finishes.everyone_seen, 400.0);
+        assert_eq!(objective.level_base(30, 1.0), 600.0);
 
         let again: Event = serde_json::from_str(&serde_json::to_string(&event).unwrap()).unwrap();
         assert_eq!(again, event);

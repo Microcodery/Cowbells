@@ -4,7 +4,8 @@ const INSTANCES = [
   "https://overpass-api.de/api/interpreter",
   "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
 ];
-const PADDING_DEG = 0.005;
+/** About 300 m: a couple of blocks beyond the courses is all the spectator needs. */
+const PADDING_DEG = 0.003;
 
 export function bbox(event) {
   const points = event.courses.flatMap((c) => c.segments.flatMap((s) => s.points));
