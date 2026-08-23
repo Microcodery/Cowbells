@@ -101,6 +101,25 @@ h1 {
   margin: 0;
 }
 
+header .row {
+  margin: 0;
+}
+
+button.plan {
+  color: #fff;
+  border-color: transparent;
+  padding: 6px 18px;
+  font-weight: 600;
+}
+
+button.plan.ready {
+  background: #16a34a;
+}
+
+button.plan.missing {
+  background: #dc2626;
+}
+
 h2 {
   font-size: 14px;
   margin: 16px 0 6px;

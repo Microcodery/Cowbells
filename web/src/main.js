@@ -275,6 +275,14 @@ const actions = {
     let planned = false;
     closePanelOnPhones();
     await run("Planning…", async () => {
+      if (!event.courses.length) throw new Error("draw or import a course first");
+      if (!event.racers.length) throw new Error("add a racer first");
+      if (!ui.osm) {
+        narrate("Fetching OpenStreetMap data…");
+        event.origin = state.courseCenter(event, mapCenter(map));
+        ui.osm = await fetchOsm(event);
+      }
+      if (!ui.network) narrate(await buildNetwork());
       const problems = await engine.call("validate", { event });
       if (problems.length) throw new Error(problems.join("; "));
       // The previous itinerary fades out while the engine's progress plays, and the new one fades in after.

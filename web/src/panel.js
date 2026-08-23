@@ -17,6 +17,13 @@ export function renderPanel(root, event, ui, actions) {
   root.innerHTML = `
     <header>
       <h1>birdeye</h1>
+      <button data-act="plan" class="plan ${event.courses.length && event.racers.length ? "ready" : "missing"}" ${ui.busy ? "disabled" : ""} title="${event.courses.length ? (event.racers.length ? "Plan where to stand" : "Add a racer first") : "Add a course first"}">Plan</button>
+      <span class="row">
+        <button data-act="theme" title="Light or dark">◐</button>
+        <button data-act="closePanel" class="phone-only" title="Back to the map">✕</button>
+      </span>
+    </header>
+    <section>
       <div class="row">
         <select data-act="example" ${ui.busy ? "disabled" : ""}>
           <option value="">Examples…</option>
@@ -27,12 +34,8 @@ export function renderPanel(root, event, ui, actions) {
         <button data-act="save" title="Save event as .bird">Save</button>
         <label class="button" title="Load a .bird event">Load<input type="file" accept=".bird,.json" data-act="load" hidden ${ui.busy ? "disabled" : ""}></label>
         <label class="button" title="Import courses from GPX">GPX<input type="file" accept=".gpx" data-act="gpx" hidden ${ui.busy ? "disabled" : ""}></label>
-        <button data-act="theme" title="Light or dark">◐</button>
-        <button data-act="closePanel" class="phone-only" title="Back to the map">✕</button>
         <button data-act="units" title="Switch units">${ui.unit.label}</button>
       </div>
-    </header>
-    <section>
       <label>Event <input data-field="name" value="${esc(event.name)}"></label>
     </section>
     ${coursesSection(event, ui)}
@@ -40,11 +43,7 @@ export function renderPanel(root, event, ui, actions) {
     ${spectatorSection(event, ui)}
     ${settingsSection(event, ui)}
     <section>
-      <h2>Plan</h2>
-      <div class="row">
-        <button data-act="fetch" ${ui.busy ? "disabled" : ""}>Fetch map data</button>
-        <button data-act="plan" ${ui.busy || !ui.network ? "disabled" : ""}>Plan</button>
-      </div>
+      <h2>Results <button data-act="fetch" ${ui.busy || !event.courses.length ? "disabled" : ""} title="Map data is fetched on the first plan; refetch after moving the courses">Refetch map</button></h2>
       <p class="muted"><span data-status>${esc(ui.status)}</span></p>
       ${ui.itinerary ? results(ui.itinerary, event, ui) : ""}
     </section>`;
