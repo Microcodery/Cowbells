@@ -26,10 +26,10 @@ export function renderPanel(root, event, ui, actions) {
           <option value="colfax-half-marathon">Colfax Half Marathon</option>
           <option value="colfax-marathon">Colfax Marathon</option>
         </select>
+      </div>
+      <div class="row">
         <button data-act="save" title="Save event as .bird">Save</button>
         <label class="button" title="Load a .bird event">Load<input type="file" accept=".bird,.json" data-act="load" hidden ${ui.busy ? "disabled" : ""}></label>
-        <label class="button" title="Import courses from GPX, KML, KMZ, TCX, FIT, or GeoJSON">Import<input type="file" accept=".gpx,.kml,.kmz,.tcx,.fit,.geojson,.json" data-act="importCourses" hidden ${ui.busy ? "disabled" : ""}></label>
-        <button data-act="units" title="Switch units">${ui.unit.label}</button>
       </div>
       <label>Event <input data-field="name" value="${esc(event.name)}"></label>
     </section>
@@ -60,6 +60,7 @@ export function renderHeader(root, event, ui, actions) {
     <span class="row">
       <button data-act="toggleTier" class="tier ${ui.tier}" title="Free: one course, two racers, one pace each. Plus: no limits.">${state.TIERS[ui.tier].label}</button>
       <button data-act="theme" title="Light or dark">◐</button>
+      <button data-act="units" title="Switch units">${ui.unit.label}</button>
       <button data-act="togglePanel" class="phone-only" title="Options">☰</button>
     </span>`;
   bindActions(root, actions);
@@ -85,6 +86,10 @@ function coursesSection(event, ui) {
   const tool = (kind, index) => ui.tool?.kind === kind && ui.tool.courseIndex === index;
   return `<details class="section" data-section="courses">
     <summary><h2>Courses ${addButton("addCourse", state.tierLocks(event, ui.tier).course, "course")}</h2></summary>
+    <div class="row">
+      ${state.tierLocks(event, ui.tier).course ? addButton("importCourses", true, "course", "Import") : `<label class="button" title="Import courses from GPX, KML, KMZ, TCX, FIT, or GeoJSON">Import<input type="file" accept=".gpx,.kml,.kmz,.tcx,.fit,.geojson,.json" data-act="importCourses" hidden ${ui.busy ? "disabled" : ""}></label>`}
+      <span class="muted">GPX, KML, KMZ, TCX, FIT, GeoJSON</span>
+    </div>
     ${event.courses
       .map(
         (course, ci) => `<div class="card">
@@ -146,7 +151,7 @@ function racersSection(event, ui) {
           <span class="muted">${(p.start_m * ui.unit.perMetre).toFixed(1)}–${state.distanceLabel(p.end_m, ui.unit, 1)}</span>
           <input data-field="pace" data-ri="${ri}" data-ii="${ii}" value="${state.paceLabel(p.seconds_per_km, ui.unit)}" size="5" title="min:sec per ${ui.unit.label}">
           ± <input type="number" data-field="uncertainty" data-ri="${ri}" data-ii="${ii}" value="${Math.round(p.uncertainty * 100)}" min="0" max="99" size="2">%
-          ${state.tierLocks(event, ui.tier).pace(racer) ? addButton("splitInterval", true, "pace") : `<button data-act="splitInterval" data-ri="${ri}" data-ii="${ii}" title="Split this interval in half">⋯</button>`}
+          ${state.tierLocks(event, ui.tier).pace(racer) ? addButton("splitInterval", true, "pace", "⋯") : `<button data-act="splitInterval" data-ri="${ri}" data-ii="${ii}" title="Split this interval in half">⋯</button>`}
           ${ii + 1 < racer.pace_profile.length ? `<button data-act="mergeInterval" data-ri="${ri}" data-ii="${ii}" title="Merge with next">merge ↓</button>` : ""}
         </div>`,
           )
@@ -251,11 +256,11 @@ const RELEASES = "https://github.com/Microcodery/cowbells/releases";
 
 const LOCK = `<svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.5" d="M4.5 7V5a3.5 3.5 0 0 1 7 0v2"/><rect x="3" y="7" width="10" height="7" rx="1.5" fill="currentColor"/></svg>`;
 
-/** An "add" button, or its locked stand-in when the tier has no room for another `what`. */
-const addButton = (act, locked, what) =>
+/** An "add" button, or the same button greyed under a lock when the tier has no room for another `what`. */
+const addButton = (act, locked, what, label = "+") =>
   locked
-    ? `<button data-act="locked" data-what="${what}" class="locked" title="Plus allows more">${LOCK}</button>`
-    : `<button data-act="${act}">+</button>`;
+    ? `<button data-act="locked" data-what="${what}" class="locked" title="Plus allows more">${label}<span class="lock">${LOCK}</span></button>`
+    : `<button data-act="${act}">${label}</button>`;
 
 const toolButton = (act, active, idle, working, extra = "") =>
   `<button data-act="${act}" ${extra} class="${active ? "active" : ""}">${active ? working : idle}</button>`;

@@ -160,9 +160,27 @@ button.plan.missing {
 }
 
 button.locked {
+  position: relative;
   color: var(--muted);
   background: var(--border);
   cursor: not-allowed;
+}
+
+/* The lock floats over the button's own label so it still reads as what it would do. */
+button.locked .lock {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.55;
+}
+
+button.locked .lock .icon {
+  height: 100%;
+  width: auto;
+  padding: 2px 0;
+  box-sizing: border-box;
 }
 
 .banner {

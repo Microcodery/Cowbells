@@ -273,11 +273,13 @@ const actions = {
       const saved = await response.json();
       event = saved.event;
       state.rebase(event, state.todayAt("09:00"));
-      ui.osm = saved.osm;
+      // Examples are demos: let them show what Plus allows.
+      if (state.overTierLimit(event, ui.tier)) actions.toggleTier();
+      ui.osm = saved.osm ?? null;
       ui.network = null;
       ui.itinerary = null;
       flyTo(map, state.courseCenter(event, event.origin));
-      ui.status = await buildNetwork();
+      ui.status = ui.osm ? await buildNetwork() : "Example loaded; map data is fetched on Plan.";
     });
   },
   async importCourses(_, input) {
