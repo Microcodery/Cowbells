@@ -60,6 +60,10 @@ export function currentTheme() {
 }
 
 function addLayers(map) {
+  // The dark basemap draws one-way traffic arrows; they read as course direction, so hide them.
+  for (const layer of map.getStyle().layers) {
+    if (/oneway/.test(layer.id)) map.setLayoutProperty(layer.id, "visibility", "none");
+  }
   for (const name of SOURCES) {
     map.addSource(name, { type: "geojson", data: empty() });
   }

@@ -21,6 +21,11 @@ export function bbox(event) {
   };
 }
 
+/** Whether the extract fetched for `outer` already covers `inner`. */
+export function covers(outer, inner) {
+  return Boolean(outer) && outer.south <= inner.south && outer.west <= inner.west && outer.north >= inner.north && outer.east >= inner.east;
+}
+
 export function query({ south, west, north, east }) {
   const box = `(${south},${west},${north},${east})`;
   return `[out:json][timeout:90];

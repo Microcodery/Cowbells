@@ -38,7 +38,7 @@ export function renderPanel(root, event, ui, actions) {
     ${spectatorSection(event, ui)}
     ${settingsSection(event, ui)}
     <section>
-      <h2>Results <button data-act="fetch" ${ui.busy || !event.courses.length ? "disabled" : ""} title="Map data is fetched on the first plan; refetch after moving the courses">Refetch map</button></h2>
+      <h2>Results</h2>
       <p class="muted"><span data-status>${esc(ui.status)}</span></p>
       ${ui.itinerary ? results(ui.itinerary, event, ui) : ""}
     </section>`;

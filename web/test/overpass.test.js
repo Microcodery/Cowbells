@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { bbox } from "../src/overpass.js";
+import { bbox, covers } from "../src/overpass.js";
+
+describe("covers", () => {
+  it("is true only when the fetched box contains the needed one", () => {
+    const outer = { south: 0, west: 0, north: 1, east: 1 };
+    expect(covers(outer, { south: 0.2, west: 0.2, north: 0.8, east: 0.8 })).toBe(true);
+    expect(covers(outer, { south: 0.2, west: 0.2, north: 1.2, east: 0.8 })).toBe(false);
+    expect(covers(null, outer)).toBe(false);
+  });
+});
 
 describe("bbox", () => {
   it("covers the courses and optional spectator points", () => {

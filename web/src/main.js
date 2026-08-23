@@ -3,7 +3,7 @@ import { createEngine } from "./engine.js";
 import { itineraryToGpx } from "./gpx.js";
 import { createMap, currentTheme, flyTo, mapCenter, render as renderMap, replayCanvas, revealItinerary, setHover, setTheme } from "./map.js";
 import { liveReplay } from "./replay.js";
-import { fetchOsm } from "./overpass.js";
+import { bbox, covers, fetchOsm } from "./overpass.js";
 import { esc, renderHeader, renderPanel } from "./panel.js";
 import * as state from "./state.js";
 
@@ -20,6 +20,8 @@ const ui = {
   itinerary: null,
   network: null,
   osm: null,
+  // The area `osm` was fetched for; courses outside it trigger a new fetch.
+  osmBox: null,
   status: "Draw a course to begin.",
   busy: false,
   beam: 64,
@@ -70,12 +72,50 @@ function mutate(edit) {
   ui.itinerary = null;
   planGeneration++;
   draw();
+  scheduleMapData();
 }
 
 /** The network depends on mode and speed; rebuild it from the cached map data rather than refetching. */
 function rebuildNetwork() {
   ui.network = null;
   if (ui.osm) run("Rebuilding network…", async () => (ui.status = await buildNetwork()));
+}
+
+const MAP_DATA_DELAY_MS = 1500;
+let mapDataTimer = null;
+let mapDataFetch = null;
+
+const hasCourse = () => event.courses.some((c) => c.segments.some((s) => s.points.length >= 2));
+
+/** Fetches map data for the courses in the background unless the extract in hand already covers them. */
+function ensureMapData() {
+  if (mapDataFetch || !hasCourse()) return mapDataFetch;
+  const needed = bbox(event);
+  if (covers(ui.osmBox, needed)) return null;
+  // The projection is centred on the courses so distances stay true across the whole event.
+  event.origin = state.courseCenter(event, mapCenter(map));
+  narrate("Fetching map data…");
+  mapDataFetch = (async () => {
+    try {
+      const osm = await fetchOsm(event);
+      ui.osm = osm;
+      ui.osmBox = needed;
+      ui.network = null;
+      narrate(await buildNetwork());
+    } catch (err) {
+      narrate(`Map data: ${err.message}`);
+    } finally {
+      mapDataFetch = null;
+      draw();
+    }
+  })();
+  return mapDataFetch;
+}
+
+/** Courses change point by point while drawing; fetch once the pen has been still for a moment. */
+function scheduleMapData() {
+  clearTimeout(mapDataTimer);
+  mapDataTimer = setTimeout(() => ensureMapData(), MAP_DATA_DELAY_MS);
 }
 
 function onMapClick(latlon) {
@@ -258,10 +298,12 @@ const actions = {
       if (!state.looksLikeEvent(loaded)) throw new Error("not a .bird event file");
       event = loaded;
       ui.osm = saved.osm ?? null;
+      ui.osmBox = ui.osm ? bbox(event) : null;
       ui.network = null;
       ui.itinerary = null;
       flyTo(map, state.courseCenter(event, event.origin));
-      ui.status = ui.osm ? await buildNetwork() : "Loaded. Fetch map data to plan.";
+      ui.status = ui.osm ? await buildNetwork() : "Loaded.";
+      if (!ui.osm) scheduleMapData();
     });
   },
   async example(_, select) {
@@ -276,10 +318,12 @@ const actions = {
       // Examples are demos: let them show what Plus allows.
       if (state.overTierLimit(event, ui.tier)) actions.toggleTier();
       ui.osm = saved.osm ?? null;
+      ui.osmBox = ui.osm ? bbox(event) : null;
       ui.network = null;
       ui.itinerary = null;
       flyTo(map, state.courseCenter(event, event.origin));
-      ui.status = ui.osm ? await buildNetwork() : "Example loaded; map data is fetched on Plan.";
+      ui.status = ui.osm ? await buildNetwork() : "Example loaded.";
+      if (!ui.osm) scheduleMapData();
     });
   },
   async importCourses(_, input) {
@@ -298,15 +342,7 @@ const actions = {
       if (courses.length) flyTo(map, state.courseCenter(event, event.origin));
       ui.status = `Imported ${courses.length} course(s).`;
     });
-  },
-  async fetch() {
-    if (event.courses.length === 0) return;
-    // The projection is centred on the courses so distances stay true across the whole event.
-    event.origin = state.courseCenter(event, mapCenter(map));
-    await run("Fetching OpenStreetMap data…", async () => {
-      ui.osm = await fetchOsm(event);
-      ui.status = await buildNetwork();
-    });
+    ensureMapData();
   },
   togglePanel() {
     document.body.classList.toggle("panel-open");
@@ -321,11 +357,10 @@ const actions = {
       if (!event.racers.length) throw new Error("add a racer first");
       const over = state.overTierLimit(event, ui.tier);
       if (over) throw new Error(`${over} — switch to Plus to plan this event`);
-      if (!ui.osm) {
-        narrate("Fetching OpenStreetMap data…");
-        event.origin = state.courseCenter(event, mapCenter(map));
-        ui.osm = await fetchOsm(event);
-      }
+      // Map data is normally already in hand from the background fetch; otherwise wait for it.
+      clearTimeout(mapDataTimer);
+      await ensureMapData();
+      if (!ui.osm) throw new Error("map data could not be fetched; try again in a moment");
       if (!ui.network) narrate(await buildNetwork());
       const problems = await engine.call("validate", { event });
       if (problems.length) throw new Error(problems.join("; "));
