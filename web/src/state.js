@@ -148,6 +148,25 @@ export function courseLength(course) {
   return course.segments.reduce((sum, s) => sum + polylineLength(s.points), 0);
 }
 
+/** The length-weighted centre of every course, or `fallback` when nothing is drawn yet. */
+export function courseCenter(event, fallback) {
+  let weight = 0;
+  let lat = 0;
+  let lon = 0;
+  for (const course of event.courses) {
+    for (const segment of course.segments) {
+      for (let i = 1; i < segment.points.length; i++) {
+        const [a, b] = [segment.points[i - 1], segment.points[i]];
+        const w = haversineM(a, b);
+        weight += w;
+        lat += (w * (a.lat + b.lat)) / 2;
+        lon += (w * (a.lon + b.lon)) / 2;
+      }
+    }
+  }
+  return weight ? { lat: lat / weight, lon: lon / weight } : fallback;
+}
+
 function polylineLength(points) {
   let total = 0;
   for (let i = 1; i < points.length; i++) total += haversineM(points[i - 1], points[i]);

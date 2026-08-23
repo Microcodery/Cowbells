@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { courseEnds, overlapChunks } from "../src/courselines.js";
+import { arrowLines, courseEnds, overlapChunks } from "../src/courselines.js";
 
 const at = (x, y) => ({ lat: 45 + y / 111195, lon: -122 + x / (111195 * Math.cos(Math.PI / 4)) });
 
@@ -23,6 +23,17 @@ describe("overlapChunks", () => {
 
   it("leaves a lone course unstriped", () => {
     expect(overlapChunks([{ points: [at(0, 0), at(500, 0)], color: "red" }])).toEqual([]);
+  });
+});
+
+describe("arrowLines", () => {
+  it("gives the shared stretch to one course and the rest to each", () => {
+    const short = { points: [at(0, 0), at(200, 0), at(200, 200)], color: "red" };
+    const long = { points: [at(0, 0), at(200, 0), at(200, -200)], color: "blue" };
+    const lines = arrowLines([short, long]);
+    expect(lines.length).toBe(2);
+    expect(lines[0][0]).toEqual(at(0, 0));
+    expect(lines[1][0].lon).toBeCloseTo(at(200, 0).lon, 6);
   });
 });
 

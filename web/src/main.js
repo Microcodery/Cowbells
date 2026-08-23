@@ -180,7 +180,7 @@ const actions = {
       ui.osm = saved.osm ?? null;
       ui.network = null;
       ui.itinerary = null;
-      flyTo(map, event.origin);
+      flyTo(map, state.courseCenter(event, event.origin));
       ui.status = ui.osm ? await buildNetwork() : "Loaded. Fetch map data to plan.";
     });
   },
@@ -196,7 +196,7 @@ const actions = {
       ui.osm = saved.osm;
       ui.network = null;
       ui.itinerary = null;
-      flyTo(map, event.origin);
+      flyTo(map, state.courseCenter(event, event.origin));
       ui.status = await buildNetwork();
     });
   },
@@ -210,13 +210,14 @@ const actions = {
         event.courses.push(course);
       }
       ui.itinerary = null;
-      if (courses[0]?.segments[0]?.points[0]) flyTo(map, courses[0].segments[0].points[0]);
+      if (courses.length) flyTo(map, state.courseCenter(event, event.origin));
       ui.status = `Imported ${courses.length} course(s).`;
     });
   },
   async fetch() {
     if (event.courses.length === 0) return;
-    event.origin = mapCenter(map);
+    // The projection is centred on the courses so distances stay true across the whole event.
+    event.origin = state.courseCenter(event, mapCenter(map));
     await run("Fetching OpenStreetMap data…", async () => {
       ui.osm = await fetchOsm(event);
       ui.status = await buildNetwork();

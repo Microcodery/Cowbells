@@ -8,7 +8,7 @@ const PADDING_DEG = 0.005;
 
 export function bbox(event) {
   const points = event.courses.flatMap((c) => c.segments.flatMap((s) => s.points));
-  points.push(event.spectator.start);
+  if (event.spectator.start) points.push(event.spectator.start);
   if (event.spectator.end) points.push(event.spectator.end.location);
   const lats = points.map((p) => p.lat);
   const lons = points.map((p) => p.lon);

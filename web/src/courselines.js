@@ -12,18 +12,39 @@ const M_PER_DEG = 111195;
  * so a shared stretch reads as a barber pole. `courses` are `{ points, color }`.
  */
 export function overlapChunks(courses) {
+  return classify(courses).flatMap((chunks) =>
+    chunks.flatMap(({ piece, sharing, owner, k }) =>
+      sharing.length >= 2 && owner ? [{ path: piece.path, color: courses[sharing[k % sharing.length]].color }] : [],
+    ),
+  );
+}
+
+/** Each course's line with the shared stretches it does not own cut out, so arrows never stack. */
+export function arrowLines(courses) {
+  return classify(courses).flatMap((chunks) => {
+    const lines = [];
+    for (const { piece, owner } of chunks) {
+      if (!owner) lines.push([]);
+      else if (lines.at(-1)?.length) lines.at(-1).push(...piece.path.slice(1));
+      else lines.push([...piece.path]);
+    }
+    return lines.filter((line) => line.length >= 2);
+  });
+}
+
+/**
+ * Every course's chunks with the courses each one runs along (`sharing`, ascending, including its
+ * own) and whether this course is the lowest of them (`owner`), which makes it the one to draw.
+ */
+function classify(courses) {
   const project = projector(courses);
   const polylines = courses.map((c) => c.points.map(project));
-  const out = [];
-  courses.forEach((course, index) => {
-    chunk(course.points, project).forEach((piece, k) => {
+  return courses.map((course, index) =>
+    chunk(course.points, project).map((piece, k) => {
       const sharing = polylines.flatMap((line, other) => (other === index || runsAlong(piece, line) ? [other] : []));
-      if (sharing.length < 2 || sharing[0] !== index) return;
-      // The lowest course emits the stretch; consecutive chunks cycle through the sharers.
-      out.push({ path: piece.path, color: courses[sharing[k % sharing.length]].color });
-    });
-  });
-  return out;
+      return { piece, k, sharing, owner: sharing[0] === index };
+    }),
+  );
 }
 
 /** Each course's first and last point, merged when within a few metres: `{ location, kind }`. */

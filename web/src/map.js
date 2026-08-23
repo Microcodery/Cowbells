@@ -2,7 +2,7 @@
 
 import { Map as MapLibre, NavigationControl, setWorkerUrl } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
-import { courseEnds, overlapChunks } from "./courselines.js";
+import { arrowLines, courseEnds, overlapChunks } from "./courselines.js";
 import { ICON_PREFIX, icons } from "./icons.js";
 import { stopLabel } from "./state.js";
 // MapLibre resolves its tile worker with a dynamic URL Vite cannot bundle; hand it a built one.
@@ -15,7 +15,7 @@ const STYLES = {
   dark: "https://tiles.openfreemap.org/styles/dark",
 };
 
-const COURSE_COLORS = ["#2563eb", "#db2777", "#16a34a", "#d97706", "#7c3aed"];
+const COURSE_COLORS = ["#2563eb", "#db2777", "#16a34a", "#d97706", "#7c3aed", "#0891b2", "#b45309", "#4b5563"];
 
 const SOURCES = [
   "courses",
@@ -86,7 +86,7 @@ function addLayers(map) {
     layout: { "line-cap": "butt" },
     paint: { "line-color": ["get", "color"], "line-width": 4, "line-opacity": 0.9 },
   });
-  // Arrows follow whole courses so their spacing does not restart at every segment.
+  // Arrows follow whole courses (minus stretches another course owns) so spacing is even.
   map.addLayer({
     id: "course-arrows",
     type: "symbol",
@@ -151,7 +151,7 @@ export function render(map, event, itinerary, editingCourse = null) {
     });
   });
   map.getSource("courses").setData(collection(courses));
-  map.getSource("course-lines").setData(collection(shapes.filter((s) => s.points.length >= 2).map((s) => feature(lineOf(s.points)))));
+  map.getSource("course-lines").setData(collection(arrowLines(shapes).map((line) => feature(lineOf(line)))));
   map.getSource("course-overlaps").setData(collection(overlapChunks(shapes).map((c) => feature(lineOf(c.path), { color: c.color }))));
   map.getSource("course-ends").setData(collection(courseEnds(shapes).map((e) => feature(pointOf(e.location), { kind: e.kind }))));
   map.getSource("vertices").setData(collection(vertices));

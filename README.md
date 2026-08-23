@@ -16,8 +16,12 @@ Runs entirely in the browser as a static page: no account, no backend.
 - **Racers:** any number; each on one course with a start offset, a pace
   profile over distance (with ±uncertainty per interval), and a priority.
 - **Spectator:** optional start point, day window, optional end point and
-  deadline, must-visit areas, walk/bike/drive; tunable sighting radius,
-  safety buffer, minimum stop, and a breadth-vs-depth dial.
+  deadline, must-visit areas, walk/bike/drive at your own pace; tunable
+  sighting radius, safety buffer, minimum stop, viewpoint spacing, and a
+  breadth-vs-depth dial.
+- **Map:** courses drawn with start/finish markers and direction arrows;
+  stretches shared by several courses striped in their colours. After each
+  plan the viewpoints, their clustering, and the search replay on the map.
 - **Routing:** OpenStreetMap roads and paths fetched on demand; never crosses
   water or buildings; straight lines allowed through parks and open areas.
 - **Planning:** viewpoints are spots on the spectator network within sight of

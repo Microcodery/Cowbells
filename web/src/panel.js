@@ -10,6 +10,9 @@ const TRAVEL = ["walk", "bike", "drive"];
  * (which tool is active, the latest itinerary, status text).
  */
 export function renderPanel(root, event, ui, actions) {
+  // Rebuilding the markup must not move the user: keep open sections open and the scroll where it was.
+  const open = new Set([...root.querySelectorAll("details[open] > summary")].map((s) => s.textContent));
+  const scroll = root.scrollTop;
   root.innerHTML = `
     <header>
       <h1>birdeye</h1>
@@ -40,6 +43,10 @@ export function renderPanel(root, event, ui, actions) {
       <p class="muted"><span data-status>${esc(ui.status)}</span> ${ui.replaying ? `<button data-act="skipReplay">Skip</button>` : ""}</p>
       ${ui.itinerary ? results(ui.itinerary, event) : ""}
     </section>`;
+  for (const summary of root.querySelectorAll("details > summary")) {
+    summary.parentElement.open = open.has(summary.textContent);
+  }
+  root.scrollTop = scroll;
 
   root.onclick = (e) => {
     const target = e.target.closest("[data-act]");
@@ -64,7 +71,7 @@ function coursesSection(event, ui) {
         <input data-field="courseName" data-ci="${ci}" value="${esc(course.name)}">
         <input type="time" data-field="courseStart" data-ci="${ci}" value="${state.clock(course.start_time)}">
         <span class="muted">${(state.courseLength(course) / 1000).toFixed(2)} km</span>
-        <button data-act="removeCourse" data-ci="${ci}" title="Remove">✕</button>
+        <button data-act="removeCourse" data-ci="${ci}" title="Remove course">${TRASH}</button>
       </div>
       <div class="row">
         ${toolButton("draw", tool("draw", ci), "Draw", "Drawing… (click map)", `data-ci="${ci}"`)}
@@ -99,7 +106,7 @@ function racersSection(event) {
       <div class="row">
         <input data-field="racerName" data-ri="${ri}" value="${esc(racer.name)}">
         <select data-field="racerCourse" data-ri="${ri}">${event.courses.map((c) => `<option value="${c.id}" ${c.id === racer.course_id ? "selected" : ""}>${esc(c.name)}</option>`).join("")}</select>
-        <button data-act="removeRacer" data-ri="${ri}" title="Remove">✕</button>
+        <button data-act="removeRacer" data-ri="${ri}" title="Remove racer">${TRASH}</button>
       </div>
       <div class="row">
         <label>offset <input type="number" data-field="racerOffset" data-ri="${ri}" value="${racer.start_offset_s / 60}" step="1" size="4"> min</label>
@@ -113,7 +120,7 @@ function racersSection(event) {
           <input data-field="pace" data-ri="${ri}" data-ii="${ii}" value="${state.paceLabel(p.seconds_per_km)}" size="5" title="min:sec per km">
           ± <input type="number" data-field="uncertainty" data-ri="${ri}" data-ii="${ii}" value="${Math.round(p.uncertainty * 100)}" min="0" max="99" size="2">%
           <button data-act="splitInterval" data-ri="${ri}" data-ii="${ii}" title="Split this interval in half">⋯</button>
-          ${ii + 1 < racer.pace_profile.length ? `<button data-act="mergeInterval" data-ri="${ri}" data-ii="${ii}" title="Merge with next">⌄</button>` : ""}
+          ${ii + 1 < racer.pace_profile.length ? `<button data-act="mergeInterval" data-ri="${ri}" data-ii="${ii}" title="Merge with next">merge ↓</button>` : ""}
         </div>`,
           )
           .join("")}
@@ -131,7 +138,7 @@ function spectatorSection(event, ui) {
     <h2>Spectator</h2>
     <div class="row">
       ${toolButton("setStart", tool("start"), s.start ? "Move start" : "Set start", "Click the map")}
-      ${s.start ? `<button data-act="clearStart" title="Let the planner choose">✕</button>` : `<span class="muted">planner chooses</span>`}
+      ${s.start ? `<button data-act="clearStart" title="Remove start; the planner chooses">${TRASH}</button>` : `<span class="muted">planner chooses</span>`}
       <label>from <input type="time" data-field="earliest" value="${state.clock(s.earliest)}"></label>
       <label>until <input type="time" data-field="latest" value="${s.latest ? state.clock(s.latest) : ""}"></label>
       <select data-field="travel">${options(TRAVEL, s.mode)}</select>
@@ -139,7 +146,7 @@ function spectatorSection(event, ui) {
     </div>
     <div class="row">
       ${toolButton("setEnd", tool("end"), s.end ? "Move end" : "Set end", "Click the map")}
-      ${s.end ? `<label>by <input type="time" data-field="endLatest" value="${state.clock(s.end.latest)}"></label><button data-act="clearEnd">✕</button>` : ""}
+      ${s.end ? `<label>by <input type="time" data-field="endLatest" value="${state.clock(s.end.latest)}"></label><button data-act="clearEnd" title="Remove end point">${TRASH}</button>` : ""}
     </div>
     <div class="row">
       ${toolButton("addRegion", tool("region"), "Add must-visit area", "Click the map")}
@@ -149,7 +156,7 @@ function spectatorSection(event, ui) {
         (r, gi) => `<div class="row">
       <span class="muted">area ${gi + 1}</span>
       <label>r <input type="number" data-field="regionRadius" data-gi="${gi}" value="${r.radius_m}" min="10" size="4"> m</label>
-      <button data-act="removeRegion" data-gi="${gi}">✕</button>
+      <button data-act="removeRegion" data-gi="${gi}" title="Remove area">${TRASH}</button>
     </div>`,
       )
       .join("")}
@@ -189,6 +196,9 @@ function results(itinerary, event) {
 
 const toolButton = (act, active, idle, working, extra = "") =>
   `<button data-act="${act}" ${extra} class="${active ? "active" : ""}">${active ? working : idle}</button>`;
+
+/** A trash-can glyph for remove buttons, so removing never looks like closing. */
+const TRASH = `<svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" d="M2.5 4h11M6.5 4V2.5h3V4M4 4l.7 9.5h6.6L12 4M6.5 7v4M9.5 7v4"/></svg>`;
 
 const options = (values, selected) => values.map((v) => `<option ${v === selected ? "selected" : ""}>${v}</option>`).join("");
 

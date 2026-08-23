@@ -121,7 +121,7 @@ The query ends with `out body; >; out skel qt;` so nodes arrive as separate elem
 
 ### Graph
 
-- Nodes: OSM nodes on kept ways. Edges: consecutive way nodes, weight `length / speed(mode, tags)`. Default speeds: walk 1.3 m/s, bike 4.5 m/s, drive from `maxspeed` or class table.
+- Nodes: OSM nodes on kept ways. Edges: consecutive way nodes, weight `length / speed(mode, tags)`. The spectator's own `speed_mps` sets the walking or cycling pace (stairs at half of it); defaults are walk 1.3 m/s, bike 4.5 m/s; driving follows `maxspeed` or a class table.
 - **Open-area shortcuts:** for each walkable polygon, collect graph nodes inside or on its boundary; add an edge between each pair whose connecting segment lies entirely inside the polygon (point-in-polygon on endpoints plus no intersection with the ring). Quadratic per polygon; polygons with more than `N` nodes (configurable, default 200) use a k-nearest (k=8) restriction. Only for walk and bike.
 - **Course closure** (opt-in): remove edges whose segment intersects any course polyline. Coarse but honest; the user controls it.
 - Spatial index: `rstar` r-tree over nodes and over edges for snapping.
