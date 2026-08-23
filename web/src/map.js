@@ -196,13 +196,9 @@ export function render(map, event, itinerary, editingCourse = null) {
   map.getSource("legs").setData(collection(legs));
 }
 
-const POINT_OPACITY = ["coalesce", ["get", "opacity"], 0.8];
-const LINE_OPACITY = ["get", "opacity"];
-
 /**
- * Overlay the replay draws on. `add*` queue features; `flush` sends each touched source once,
- * since every `setData` re-tiles the whole source. `fade*` animate a source with a paint
- * expression instead, which costs nothing per frame.
+ * Map layers the search stage draws on. `add*` queue features; `flush` sends each touched
+ * source once per frame, since every `setData` re-tiles the whole source.
  */
 export function replayCanvas(map) {
   const layers = { "replay-points": [], "replay-lines": [], "replay-fills": [] };
@@ -215,9 +211,8 @@ export function replayCanvas(map) {
     addCircles(latlons, color, radiusM, opacity) {
       add("replay-fills", latlons.map((p) => feature(circleOf(p, radiusM, 16), { color, opacity })));
     },
-    /** `extra` merges into every point's properties, for paint expressions to key on. */
-    addPoints(latlons, color, radius, opacity = 0.8, extra = null) {
-      add("replay-points", latlons.map((p, i) => feature(pointOf(p), { color, radius, opacity, ...extra?.(i) })));
+    addPoints(latlons, color, radius, opacity = 0.8) {
+      add("replay-points", latlons.map((p) => feature(pointOf(p), { color, radius, opacity })));
     },
     addLines(paths, color, width, opacity) {
       add("replay-lines", paths.filter((p) => p.length >= 2).map((p) => feature(lineOf(p), { color, width, opacity })));
@@ -231,14 +226,6 @@ export function replayCanvas(map) {
     flush() {
       for (const source of dirty) map.getSource(source)?.setData(collection(layers[source]));
       dirty.clear();
-    },
-    /** Point opacity as an expression over each point's properties; `null` restores the default. */
-    fadePoints(expression) {
-      map.setPaintProperty("replay-points", "circle-opacity", expression ?? POINT_OPACITY);
-    },
-    /** Scale every line's own opacity by `factor`; `null` restores the default. */
-    fadeLines(factor) {
-      map.setPaintProperty("replay-lines", "line-opacity", factor == null ? LINE_OPACITY : ["*", LINE_OPACITY, factor]);
     },
   };
 }

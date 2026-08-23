@@ -3,6 +3,7 @@ import { createEngine } from "./engine.js";
 import { itineraryToGpx } from "./gpx.js";
 import { createMap, currentTheme, fitTo, flyTo, mapCenter, render as renderMap, replayCanvas, revealItinerary, setHover, setTheme } from "./map.js";
 import { loadMapData, saveMapData } from "./store.js";
+import { overlay } from "./overlay.js";
 import { liveReplay } from "./replay.js";
 import { bbox, covers, fetchOsm } from "./overpass.js";
 import { esc, renderHeader, renderPanel } from "./panel.js";
@@ -58,6 +59,7 @@ let planGeneration = 0;
 
 let event = loadSaved() ?? state.newEvent(DEFAULT_CENTER);
 const map = createMap("map", event.origin, onMapClick, onMapHover);
+const paint = overlay(map);
 const top = document.getElementById("top");
 const hoverTip = document.getElementById("hover");
 const mapStatus = document.getElementById("mapstatus");
@@ -449,7 +451,7 @@ const actions = {
         const problems = await engine.call("validate", { event });
         if (problems.length) throw new Error(problems.join("; "));
         const radius = event.spectator.sighting_radius_m;
-        const live = liveReplay(replayCanvas(map), radius, narrate, () => (scan.hidden = true), ui.debug);
+        const live = liveReplay({ ctx: replayCanvas(map), paint }, radius, narrate, () => (scan.hidden = true), ui.debug);
         itinerary = await engine.call("plan", { event, options: { beam: ui.beam, trace: true } }, live.push);
         await live.finish();
         if (generation === planGeneration) break;

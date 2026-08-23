@@ -10,6 +10,7 @@ use geo::{BoundingRect, Distance, Euclidean, Intersects, Line, LineString};
 use rstar::primitives::GeomWithData;
 use rstar::{AABB, RTree};
 
+use crate::Routes;
 use crate::TravelTime;
 use crate::osm::Osm;
 use crate::profile::{Direction, Passage, is_open_area, open_area_speed, passage};
@@ -323,13 +324,11 @@ impl TravelTime for Graph {
     }
 
     fn matrix(&self, nodes: &[NodeId]) -> Vec<Vec<Option<Seconds>>> {
-        nodes
-            .iter()
-            .map(|&from| {
-                let (cost, _) = self.dijkstra(from, nodes);
-                nodes.iter().map(|&to| cost[to].is_finite().then_some(cost[to])).collect()
-            })
-            .collect()
+        self.routes(nodes).times
+    }
+
+    fn routes(&self, nodes: &[NodeId]) -> Routes {
+        Routes::new(nodes, nodes.iter().map(|&from| self.dijkstra(from, nodes)).collect())
     }
 }
 

@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 
 use birdseye_core::geom::{Polyline, Projection};
 use birdseye_core::{Event, LatLon, Seconds};
-use birdseye_routing::{NodeId, TravelTime};
+use birdseye_routing::{NodeId, Routes, TravelTime};
 use serde::Serialize;
 
 use crate::viewpoints::Viewpoint;
@@ -70,7 +70,7 @@ pub enum Progress {
     Viewpoints {
         viewpoints: Vec<ViewpointTrace>,
     },
-    /// A batch of search events, plus road paths for any new legs of the best plan so far.
+    /// A batch of search events, plus road paths for legs tried for the first time in it.
     Search {
         events: Vec<LabelEvent>,
         legs: Vec<LegTrace>,
@@ -108,48 +108,41 @@ pub fn viewpoint_traces(
         .collect()
 }
 
-/// Follows the search's best label and routes the legs of its chain as they first appear.
+/// Every distinct leg the search tries, at most this many; the drawing shows them all.
+pub const MAX_LEGS: usize = 8_000;
+
+/// Routes each leg the search tries the first time it appears, from the shortest-path trees.
 #[derive(Default)]
-pub struct BestLegs {
+pub struct LegRouter {
     viewpoint_of: HashMap<usize, usize>,
-    parent_of: HashMap<usize, Option<usize>>,
-    best: Option<(usize, f64)>,
     sent: HashSet<(usize, usize)>,
 }
 
-impl BestLegs {
-    /// Legs of the best chain after `events` that have not been reported yet.
+impl LegRouter {
+    /// Road paths for the legs among `events` not reported before.
     pub fn update(
         &mut self,
         events: &[LabelEvent],
         nodes: &[NodeId],
+        routes: &Routes,
         graph: &impl TravelTime,
         projection: &Projection,
     ) -> Vec<LegTrace> {
-        for event in events {
-            if let LabelEvent::Kept { label, parent, viewpoint, score, .. } = event {
-                self.viewpoint_of.insert(*label, *viewpoint);
-                self.parent_of.insert(*label, *parent);
-                if self.best.is_none_or(|(_, top)| *score > top) {
-                    self.best = Some((*label, *score));
-                }
-            }
-        }
-        let Some((mut current, _)) = self.best else { return Vec::new() };
         let mut legs = Vec::new();
-        // An ancestor leg already sent means the rest of the chain was too.
-        while let Some(Some(parent)) = self.parent_of.get(&current) {
-            let pair = (self.viewpoint_of[parent], self.viewpoint_of[&current]);
-            if pair.0 == pair.1 || !self.sent.insert(pair) {
-                break;
+        for event in events {
+            let LabelEvent::Kept { label, parent, viewpoint, .. } = event else { continue };
+            self.viewpoint_of.insert(*label, *viewpoint);
+            let Some(from) = parent.map(|p| self.viewpoint_of[&p]) else { continue };
+            let pair = (from, *viewpoint);
+            if from == *viewpoint || self.sent.len() >= MAX_LEGS || !self.sent.insert(pair) {
+                continue;
             }
-            let path = graph.path(nodes[pair.0], nodes[pair.1]).unwrap_or_default();
+            let path = routes.path(graph, from, nodes[*viewpoint]).unwrap_or_default();
             legs.push(LegTrace {
-                from: pair.0,
-                to: pair.1,
+                from,
+                to: *viewpoint,
                 path: path.into_iter().map(|p| projection.to_latlon(p)).collect(),
             });
-            current = *parent;
         }
         legs
     }

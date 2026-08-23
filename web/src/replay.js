@@ -4,30 +4,33 @@
 //   candidates – spots within sight brighten while the rest fade      (candidatesMs)
 //   merge      – candidates slide into their viewpoint, whose sighting circle and arc grow (mergeMs)
 //   search     – the search plays out with the best plan lit along the roads (≥ searchMs)
-// The big point sets are sent to the map once and animated with paint expressions; only the
-// merge rebuilds geometry per frame, on a thinned set, so frames stay cheap.
+// The first three stages draw on a canvas overlay (`paint`), which can redraw thousands of dots
+// every frame; the search draws through MapLibre (`ctx`), where a few hundred shapes a frame is fine.
 
 const DEFAULT_MS = { network: 1000, candidates: 1000, merge: 1000, search: 3000 };
 /** Candidates animated in the merge; more than this is thinned for frame rate. */
-const MAX_MERGING = 1500;
+const MAX_MERGING = 4000;
 const RECENT_REACHED = 40;
 const RECENT_REJECTS = 25;
 const NETWORK_COLOR = "#64748b";
 const CANDIDATE_COLOR = "#f59e0b";
 const VIEWPOINT_COLOR = "#ea580c";
-const BEST_COLOR = "#0f766e";
+const BEST_COLOR = "#facc15";
+const TRIED_COLOR = "#fde047";
 const REJECT_COLOR = "#7f1d1d";
+/** Legs the search tried most recently stay on screen, faded, behind the best plan. */
+const RECENT_LEGS = 150;
 
 const ease = (t) => (t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2);
 const clamp01 = (t) => Math.min(1, Math.max(0, t));
 const key = (p) => `${p.lat.toFixed(6)},${p.lon.toFixed(6)}`;
 
 /**
- * Feed progress messages with `push`; they are animated onto `ctx` with `timings` (ms per
- * stage). `onFirstDraw` fires when the first report lands. `finish()` resolves once the last
- * stage has played.
+ * Feed progress messages with `push`; they are animated onto the `paint` overlay and the map's
+ * `ctx` with `timings` (ms per stage). `onFirstDraw` fires when the first report lands.
+ * `finish()` resolves once the last stage has played.
  */
-export function liveReplay(ctx, radius, onStatus, onFirstDraw = () => {}, timings = {}) {
+export function liveReplay({ ctx, paint }, radius, onStatus, onFirstDraw = () => {}, timings = {}) {
   const ms = {
     network: timings.networkMs ?? DEFAULT_MS.network,
     candidates: timings.candidatesMs ?? DEFAULT_MS.candidates,
@@ -41,32 +44,23 @@ export function liveReplay(ctx, radius, onStatus, onFirstDraw = () => {}, timing
   const search = searchState(ctx, radius);
   let stage = null;
   let stageStart = 0;
+  let others = [];
   let merging = null;
   let lastStatus = "";
   const status = (text) => text !== lastStatus && onStatus((lastStatus = text));
 
-  /** Runs once when a stage begins: sends its geometry, which the frames then only restyle. */
+  /** Runs once when a stage begins and prepares what its frames draw. */
   const enter = (now, next) => {
     stage = next;
     stageStart = now;
-    ctx.clear();
-    ctx.fadePoints(null);
-    ctx.fadeLines(null);
     if (next === "network") {
-      const n = data.network.length;
-      ctx.addPoints(data.network, NETWORK_COLOR, 2, 0.8, (i) => ({ order: i / n }));
       status("Walkable network near the course");
-    } else if (next === "candidates") {
-      const lit = new Set(data.candidates.map(key));
-      ctx.addPoints(data.network.filter((p) => !lit.has(key(p))), NETWORK_COLOR, 2, 0.8, () => ({ kind: "node" }));
-      ctx.addPoints(data.candidates, CANDIDATE_COLOR, 4, 0.8, () => ({ kind: "lit" }));
-      status(`${data.candidates.length} spots within sighting distance of the course`);
     } else if (next === "merge") {
       merging = mergePlan(data.candidates, data.viewpoints);
-      ctx.addLines(data.viewpoints.flatMap((v) => v.arcs.map((a) => a.path)), VIEWPOINT_COLOR, 4, 0.7);
       status(`Clustered to ${data.viewpoints.length} viewpoints, each covering a stretch of course`);
+    } else if (next === "search") {
+      paint.clear();
     }
-    ctx.flush();
   };
 
   /** The next stage starts when its data is in and the current one has run its time. */
@@ -81,18 +75,29 @@ export function liveReplay(ctx, radius, onStatus, onFirstDraw = () => {}, timing
   const draw = (now) => {
     const p = clamp01((now - stageStart) / ms[stage]);
     if (stage === "network") {
-      ctx.fadePoints(["case", ["<=", ["get", "order"], ease(p)], 0.8, 0]);
+      paint.clear();
+      paint.dots("network", data.network, NETWORK_COLOR, 2, 0.8, 0, Math.ceil(data.network.length * ease(p)));
     } else if (stage === "candidates") {
-      ctx.fadePoints(["case", ["==", ["get", "kind"], "lit"], 0.2 + 0.6 * ease(p), 0.8 * (1 - ease(p))]);
+      // Chunks keep arriving during the stage; the unlit set follows them.
+      if (others.count !== data.candidates.length) {
+        const lit = new Set(data.candidates.map(key));
+        others = data.network.filter((p) => !lit.has(key(p)));
+        others.count = data.candidates.length;
+        status(`${data.candidates.length} spots within sighting distance of the course`);
+      }
+      paint.clear();
+      paint.dots(`others:${others.count}`, others, NETWORK_COLOR, 2, 0.8 * (1 - ease(p)));
+      paint.dots(`candidates:${data.candidates.length}`, data.candidates, CANDIDATE_COLOR, 3, 0.2 + 0.6 * ease(p));
     } else if (stage === "merge") {
+      // Candidates slide home, then each viewpoint's sighting range sweeps open like a radar.
       const slide = ease(clamp01(p / 0.6));
-      const grow = ease(clamp01((p - 0.5) / 0.5));
-      ctx.clear("replay-points", "replay-fills");
-      const moved = merging.map(({ from, to }) => ({ lat: from.lat + (to.lat - from.lat) * slide, lon: from.lon + (to.lon - from.lon) * slide }));
-      ctx.addPoints(moved, CANDIDATE_COLOR, 4, 0.8 * (1 - grow));
-      if (grow > 0) ctx.addCircles(data.viewpoints.map((v) => v.location), VIEWPOINT_COLOR, radius * grow, 0.35);
-      ctx.fadeLines(grow);
-      ctx.flush();
+      const sweep = clamp01((p - 0.45) / 0.55);
+      paint.clear();
+      paint.slidingDots("merge", merging.from, merging.to, slide, CANDIDATE_COLOR, 3, 0.8 * (1 - sweep));
+      if (sweep > 0) {
+        paint.sectors("viewpoints", merging.centres, VIEWPOINT_COLOR, radius, 0.35, 2 * Math.PI * sweep);
+        paint.lines("arcs", merging.arcs, VIEWPOINT_COLOR, 4, 0.7 * sweep);
+      }
     } else if (stage === "search") {
       // Play the events that have arrived in proportion to the stage's time, one by one, so a
       // fast engine still unfolds over the whole stage and a slow one is shown as it comes.
@@ -101,7 +106,7 @@ export function liveReplay(ctx, radius, onStatus, onFirstDraw = () => {}, timing
       ctx.clear();
       search.draw(data.viewpoints);
       ctx.flush();
-      status(`Searching… ${search.count} decisions · teal = best plan so far`);
+      status(`Searching… ${search.count} decisions · bright yellow = best plan so far`);
     }
   };
 
@@ -132,30 +137,29 @@ export function liveReplay(ctx, radius, onStatus, onFirstDraw = () => {}, timing
       if (!data.network) data.network = [];
       if (!data.viewpoints) data.viewpoints = [];
       return done.then(() => {
+        paint.clear();
         ctx.clear();
-        ctx.fadePoints(null);
-        ctx.fadeLines(null);
         ctx.flush();
       });
     },
   };
 }
 
-/** Where each candidate slides to: the nearest viewpoint (the engine's clusters are spatial). */
+/** Where each candidate slides to (the nearest viewpoint: the engine's clusters are spatial), plus what grows there. */
 function mergePlan(candidates, viewpoints) {
   const stride = Math.max(1, Math.ceil(candidates.length / MAX_MERGING));
   const kx = Math.cos(((viewpoints[0]?.location.lat ?? 0) * Math.PI) / 180);
-  return candidates
-    .filter((_, i) => i % stride === 0)
-    .map((from) => {
-      let to = from;
-      let best = Infinity;
-      for (const v of viewpoints) {
-        const d = ((v.location.lon - from.lon) * kx) ** 2 + (v.location.lat - from.lat) ** 2;
-        if (d < best) [best, to] = [d, v.location];
-      }
-      return { from, to };
-    });
+  const from = candidates.filter((_, i) => i % stride === 0);
+  const to = from.map((c) => {
+    let nearest = c;
+    let best = Infinity;
+    for (const v of viewpoints) {
+      const d = ((v.location.lon - c.lon) * kx) ** 2 + (v.location.lat - c.lat) ** 2;
+      if (d < best) [best, nearest] = [d, v.location];
+    }
+    return nearest;
+  });
+  return { from, to, centres: viewpoints.map((v) => v.location), arcs: viewpoints.flatMap((v) => v.arcs.map((a) => a.path)) };
 }
 
 /** The search as drawn: visited viewpoints, the ones just reached, rejections, and the best chain. */
@@ -164,6 +168,7 @@ function searchState(ctx, radius) {
   const alive = new Map();
   const visited = new Set();
   const recent = [];
+  const tried = [];
   const rejected = [];
   let best = { score: -Infinity, chain: [] };
   const state = {
@@ -180,6 +185,10 @@ function searchState(ctx, radius) {
         visited.add(e.viewpoint);
         recent.push(e.viewpoint);
         if (recent.length > RECENT_REACHED) recent.shift();
+        if (parentChain.length) {
+          tried.push(`${parentChain.at(-1)}>${e.viewpoint}`);
+          if (tried.length > RECENT_LEGS) tried.shift();
+        }
         if (e.score > best.score) best = entry;
       } else if (e.kind === "trimmed") {
         alive.delete(e.label);
@@ -191,7 +200,7 @@ function searchState(ctx, radius) {
     },
     draw(viewpoints) {
       const at = (i) => viewpoints[i].location;
-      // Only the best chain's legs are routed; anything else would be a straight line.
+      // Every tried leg is routed up to the engine's cap; past it a straight line stands in.
       const leg = (from, to) => legPath.get(`${from}>${to}`) ?? [at(from), at(to)];
       const onBest = new Set(best.chain);
       const justReached = new Set(recent);
@@ -199,7 +208,8 @@ function searchState(ctx, radius) {
       ctx.addCircles([...visited].filter((i) => !onBest.has(i) && !justReached.has(i)).map(at), VIEWPOINT_COLOR, radius, 0.4);
       ctx.addCircles([...justReached].filter((i) => !onBest.has(i)).map(at), CANDIDATE_COLOR, radius, 0.7);
       ctx.addPoints(rejected, REJECT_COLOR, 5);
-      ctx.addLines(best.chain.slice(1).map((to, k) => leg(best.chain[k], to)), BEST_COLOR, 4, 0.9);
+      ctx.addLines([...new Set(tried)].map((pair) => legPath.get(pair) ?? leg(...pair.split(">").map(Number))), TRIED_COLOR, 1.5, 0.12);
+      ctx.addLines(best.chain.slice(1).map((to, k) => leg(best.chain[k], to)), BEST_COLOR, 5, 1);
       ctx.addCircles(best.chain.map(at), BEST_COLOR, radius, 0.8);
     },
   };

@@ -9,7 +9,7 @@ use serde::Serialize;
 use thiserror::Error;
 
 use crate::planner::{Options, Problem, Region, plan_with};
-use crate::trace::{BestLegs, LabelEvent, Progress, viewpoint_traces};
+use crate::trace::{LabelEvent, LegRouter, Progress, viewpoint_traces};
 use crate::viewpoints::{Kind, Viewpoint, add_sightings, cluster, raw_viewpoints_with};
 
 #[derive(Debug, Error)]
@@ -135,8 +135,9 @@ pub fn solve_with(
         .collect();
 
     let nodes: Vec<NodeId> = all.iter().map(|c| c.node).collect();
+    let routes = graph.routes(&nodes);
     let problem = Problem {
-        travel: graph.matrix(&nodes),
+        travel: routes.times.clone(),
         viewpoints: all,
         start,
         earliest: spectator.earliest as f64,
@@ -148,9 +149,9 @@ pub fn solve_with(
         objective: spectator.objective.clone(),
         regions,
     };
-    let mut best_legs = BestLegs::default();
+    let mut router = LegRouter::default();
     let mut sink = |events: Vec<LabelEvent>| {
-        let legs = best_legs.update(&events, &nodes, graph, &projection);
+        let legs = router.update(&events, &nodes, &routes, graph, &projection);
         progress(Progress::Search { events, legs });
     };
     let result = plan_with(&problem, options, &mut sink);
@@ -179,11 +180,8 @@ pub fn solve_with(
         .stops
         .windows(2)
         .map(|pair| {
-            let (from, to) = (
-                problem.viewpoints[pair[0].viewpoint].node,
-                problem.viewpoints[pair[1].viewpoint].node,
-            );
-            let path: Vec<Point> = graph.path(from, to).unwrap_or_default();
+            let to = problem.viewpoints[pair[1].viewpoint].node;
+            let path: Vec<Point> = routes.path(graph, pair[0].viewpoint, to).unwrap_or_default();
             Leg {
                 seconds: pair[1].arrive - pair[0].depart,
                 path: path.into_iter().map(|p| projection.to_latlon(p)).collect(),
