@@ -48,13 +48,14 @@ mode, line-of-sight, elevation. See [afx/SPEC.md](afx/SPEC.md).
 ## Development
 
 Requires Rust stable with the `wasm32-unknown-unknown` target, `wasm-pack`,
-Node 22, and [`just`](https://github.com/casey/just).
+and Node 22. The `Makefile` and `justfile` define the same targets; use
+whichever you have.
 
-    just setup   # one-time: install web deps and a headless browser
-    just test    # lint, wasm build, cargo test, web tests
-    just build   # release wasm + vite build into web/dist
-    just serve   # build, then serve web/dist locally
-    just dev     # wasm dev build + vite dev server with hot reload
+    make setup   # one-time: install web deps and a headless browser
+    make test    # lint, wasm build, cargo test, web tests
+    make build   # release wasm + vite build into web/dist
+    make serve   # build, then serve web/dist locally
+    make dev     # wasm dev build + vite dev server with hot reload
 
 ## Status
 
