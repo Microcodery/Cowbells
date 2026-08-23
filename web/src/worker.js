@@ -9,10 +9,11 @@ const handlers = {
   ping: ({ msg }) => ping(msg),
   validate: ({ event }) => JSON.parse(validate(JSON.stringify(event))),
   gpx: ({ xml }) => JSON.parse(parse_gpx(xml)),
-  network: ({ osm, origin, mode }) => {
+  network: ({ osm, origin, mode, speed }) => {
     network?.free();
     network = null;
-    network = new Network(osm, JSON.stringify(origin), mode);
+    // wasm-bindgen maps only `undefined` to `None`, and an unset speed arrives as `null`.
+    network = new Network(osm, JSON.stringify(origin), mode, speed ?? undefined);
     return { nodes: network.node_count(), edges: network.edge_count() };
   },
   plan: ({ event, options }) => {

@@ -21,24 +21,35 @@ pub struct Passage {
 }
 
 const WALK_SPEED: f64 = 1.3;
-const STEPS_SPEED: f64 = 0.6;
 const BIKE_SPEED: f64 = 4.5;
+/// Stairs are climbed at this fraction of walking speed.
+const STEPS_FACTOR: f64 = 0.5;
 const KMH: f64 = 1000.0 / 3600.0;
 
-pub fn passage(mode: TravelMode, way: &Way) -> Option<Passage> {
+/// A typical speed for the mode, used when the spectator gives none.
+pub fn default_speed(mode: TravelMode) -> f64 {
+    match mode {
+        TravelMode::Walk => WALK_SPEED,
+        TravelMode::Bike => BIKE_SPEED,
+        TravelMode::Drive => 50.0 * KMH,
+    }
+}
+
+/// How `mode` may use `way`; `speed` is the spectator's own pace on ordinary ways
+/// (driving follows posted limits instead).
+pub fn passage(mode: TravelMode, way: &Way, speed: f64) -> Option<Passage> {
     let highway = way.tag("highway")?;
     match mode {
-        TravelMode::Walk => walk(highway, way),
-        TravelMode::Bike => bike(highway, way),
+        TravelMode::Walk => walk(highway, way, speed),
+        TravelMode::Bike => bike(highway, way, speed),
         TravelMode::Drive => drive(highway, way),
     }
 }
 
 /// Speed across open ground for modes that may leave the road network.
-pub fn open_area_speed(mode: TravelMode) -> Option<f64> {
+pub fn open_area_speed(mode: TravelMode, speed: f64) -> Option<f64> {
     match mode {
-        TravelMode::Walk => Some(WALK_SPEED),
-        TravelMode::Bike => Some(BIKE_SPEED),
+        TravelMode::Walk | TravelMode::Bike => Some(speed),
         TravelMode::Drive => None,
     }
 }
@@ -69,7 +80,7 @@ fn direction(way: &Way) -> Direction {
     }
 }
 
-fn walk(highway: &str, way: &Way) -> Option<Passage> {
+fn walk(highway: &str, way: &Way, speed: f64) -> Option<Passage> {
     let allowed = matches!(
         highway,
         "footway"
@@ -93,12 +104,12 @@ fn walk(highway: &str, way: &Way) -> Option<Passage> {
             | "primary_link"
             | "trunk_link"
     );
-    let speed = if highway == "steps" { STEPS_SPEED } else { WALK_SPEED };
+    let speed = if highway == "steps" { speed * STEPS_FACTOR } else { speed };
     (allowed && permitted(way, &["foot"]))
         .then_some(Passage { metres_per_second: speed, direction: Direction::Both })
 }
 
-fn bike(highway: &str, way: &Way) -> Option<Passage> {
+fn bike(highway: &str, way: &Way, speed: f64) -> Option<Passage> {
     let rideable = matches!(
         highway,
         "cycleway"
@@ -120,7 +131,7 @@ fn bike(highway: &str, way: &Way) -> Option<Passage> {
     if !(rideable || shared_footway) || !permitted(way, &["bicycle", "vehicle"]) {
         return None;
     }
-    let speed = if way.tag("bicycle") == Some("dismount") { WALK_SPEED } else { BIKE_SPEED };
+    let speed = if way.tag("bicycle") == Some("dismount") { WALK_SPEED } else { speed };
     let direction = match way.tag("oneway:bicycle") {
         Some("no") => Direction::Both,
         Some("yes") => Direction::Forward,
@@ -171,13 +182,13 @@ mod tests {
     }
 
     fn walk(pairs: &[(&str, &str)]) -> Option<Passage> {
-        passage(TravelMode::Walk, &way(pairs))
+        passage(TravelMode::Walk, &way(pairs), WALK_SPEED)
     }
     fn bike(pairs: &[(&str, &str)]) -> Option<Passage> {
-        passage(TravelMode::Bike, &way(pairs))
+        passage(TravelMode::Bike, &way(pairs), BIKE_SPEED)
     }
     fn drive(pairs: &[(&str, &str)]) -> Option<Passage> {
-        passage(TravelMode::Drive, &way(pairs))
+        passage(TravelMode::Drive, &way(pairs), 0.0)
     }
 
     #[test]
@@ -189,7 +200,14 @@ mod tests {
         );
         assert!(walk(&[("highway", "trunk")]).is_some());
         assert!(walk(&[("highway", "motorway")]).is_none());
-        assert_eq!(walk(&[("highway", "steps")]).unwrap().metres_per_second, STEPS_SPEED);
+        assert_eq!(
+            walk(&[("highway", "steps")]).unwrap().metres_per_second,
+            WALK_SPEED * STEPS_FACTOR
+        );
+        assert_eq!(
+            passage(TravelMode::Walk, &way(&[("highway", "path")]), 2.0).unwrap().metres_per_second,
+            2.0
+        );
     }
 
     #[test]

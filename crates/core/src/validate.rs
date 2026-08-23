@@ -36,6 +36,8 @@ pub enum ValidationError {
     RepeatDecay,
     #[error("the day must end after it starts")]
     DayWindow,
+    #[error("spectator speed must be positive and finite")]
+    Speed,
 }
 
 impl Event {
@@ -67,6 +69,9 @@ fn check_spectator(spectator: &SpectatorConfig, errors: &mut Vec<ValidationError
     let ends = spectator.latest.into_iter().chain(spectator.end.map(|e| e.latest));
     if ends.into_iter().any(|t| t < spectator.earliest) {
         errors.push(ValidationError::DayWindow);
+    }
+    if spectator.speed_mps.is_some_and(|s| !(s > 0.0 && s.is_finite())) {
+        errors.push(ValidationError::Speed);
     }
 }
 
@@ -191,6 +196,7 @@ mod tests {
                 latest: None,
                 end: None,
                 mode: TravelMode::Walk,
+                speed_mps: None,
                 sighting_radius_m: 30.0,
                 safety_buffer_s: 120.0,
                 min_stop_s: 60.0,
@@ -259,12 +265,14 @@ mod tests {
         e.spectator.objective.tiers = vec![Tier::Finish, Tier::Finish];
         e.spectator.objective.repeat_decay = 1.5;
         e.spectator.latest = Some(-1);
+        e.spectator.speed_mps = Some(0.0);
         assert_eq!(
             e.validate(),
             Err(vec![
                 ValidationError::Tiers,
                 ValidationError::RepeatDecay,
-                ValidationError::DayWindow
+                ValidationError::DayWindow,
+                ValidationError::Speed
             ])
         );
     }

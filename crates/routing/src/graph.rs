@@ -42,9 +42,10 @@ impl Graph {
         Self { edges: vec![Vec::new(); points.len()], index: RTree::bulk_load(indexed), points }
     }
 
-    pub fn build(osm: &Osm, projection: &Projection, mode: TravelMode) -> Self {
+    /// `speed` is the spectator's pace in m/s on ordinary ways.
+    pub fn build(osm: &Osm, projection: &Projection, mode: TravelMode, speed: f64) -> Self {
         let usable: Vec<_> =
-            osm.ways.iter().filter_map(|w| passage(mode, w).map(|p| (w, p))).collect();
+            osm.ways.iter().filter_map(|w| passage(mode, w, speed).map(|p| (w, p))).collect();
         let mut ids = HashMap::new();
         let mut points = Vec::new();
         for (way, _) in &usable {
@@ -72,7 +73,7 @@ impl Graph {
                 }
             }
         }
-        if let Some(speed) = open_area_speed(mode) {
+        if let Some(speed) = open_area_speed(mode, speed) {
             for way in osm.ways.iter().filter(|w| is_open_area(w)) {
                 let ring: Vec<_> = way
                     .nodes
@@ -340,7 +341,8 @@ mod tests {
         fn build(mode: TravelMode) -> Self {
             let osm = Osm::parse(include_str!("../tests/fixtures/small.json")).unwrap();
             let projection = Projection::new(LatLon { lat: 45.0, lon: -122.0 });
-            Self { graph: Graph::build(&osm, &projection, mode), osm, projection }
+            let graph = Graph::build(&osm, &projection, mode, crate::profile::default_speed(mode));
+            Self { graph, osm, projection }
         }
 
         /// Graph node for an OSM node id.
@@ -434,7 +436,7 @@ mod tests {
         let mut osm = Osm::parse(include_str!("../tests/fixtures/small.json")).unwrap();
         osm.nodes.remove(&2);
         let proj = Projection::new(LatLon { lat: 45.0, lon: -122.0 });
-        let g = Graph::build(&osm, &proj, TravelMode::Walk);
+        let g = Graph::build(&osm, &proj, TravelMode::Walk, 1.0);
         let at = |id: i64| g.snap(proj.to_local(osm.nodes[&id]), 1.0).unwrap();
         assert_eq!(g.time(at(1), at(3)), None, "must not bridge the gap");
         assert!(g.time(at(1), at(7)).is_some());

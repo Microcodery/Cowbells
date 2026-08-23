@@ -135,6 +135,7 @@ function spectatorSection(event, ui) {
       <label>from <input type="time" data-field="earliest" value="${state.clock(s.earliest)}"></label>
       <label>until <input type="time" data-field="latest" value="${s.latest ? state.clock(s.latest) : ""}"></label>
       <select data-field="travel">${options(TRAVEL, s.mode)}</select>
+      ${s.mode === "drive" ? "" : `<label>at <input type="number" data-field="speed" value="${s.speed_mps ? (s.speed_mps * state.KMH_PER_MPS).toFixed(1) : ""}" placeholder="${state.DEFAULT_SPEED_KMH[s.mode]}" min="0.5" step="0.5" size="4" title="your pace on ordinary streets; blank for a typical one"> km/h</label>`}
     </div>
     <div class="row">
       ${toolButton("setEnd", tool("end"), s.end ? "Move end" : "Set end", "Click the map")}

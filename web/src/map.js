@@ -2,6 +2,8 @@
 
 import { Map as MapLibre, NavigationControl, setWorkerUrl } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
+import { courseEnds, overlapChunks } from "./courselines.js";
+import { ICON_PREFIX, icons } from "./icons.js";
 import { stopLabel } from "./state.js";
 // MapLibre resolves its tile worker with a dynamic URL Vite cannot bundle; hand it a built one.
 import workerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url";
@@ -15,7 +17,20 @@ const STYLES = {
 
 const COURSE_COLORS = ["#2563eb", "#db2777", "#16a34a", "#d97706", "#7c3aed"];
 
-const SOURCES = ["courses", "vertices", "spectator", "regions", "stops", "legs", "replay-fills", "replay-lines", "replay-points"];
+const SOURCES = [
+  "courses",
+  "course-lines",
+  "course-overlaps",
+  "course-ends",
+  "vertices",
+  "spectator",
+  "regions",
+  "stops",
+  "legs",
+  "replay-fills",
+  "replay-lines",
+  "replay-points",
+];
 
 export function createMap(container, center, onClick) {
   const map = new MapLibre({
@@ -45,6 +60,9 @@ function addLayers(map) {
   for (const name of SOURCES) {
     map.addSource(name, { type: "geojson", data: empty() });
   }
+  for (const [name, image] of Object.entries(icons())) {
+    if (!map.hasImage(name)) map.addImage(name, image, { pixelRatio: 2 });
+  }
   map.addLayer({ id: "regions", type: "fill", source: "regions", paint: { "fill-color": "#a855f7", "fill-opacity": 0.2 } });
   // Sighting circles sit under the course lines so the course stays readable during replay.
   map.addLayer({
@@ -60,7 +78,35 @@ function addLayers(map) {
     paint: { "line-color": "#f97316", "line-width": 4, "line-dasharray": [1, 1.5], "line-opacity-transition": { duration: 600 } },
   });
   map.addLayer({ id: "courses", type: "line", source: "courses", paint: { "line-color": ["get", "color"], "line-width": 4, "line-opacity": 0.85 } });
+  // Stretches shared by several courses are redrawn on top as alternating stripes.
+  map.addLayer({
+    id: "course-overlaps",
+    type: "line",
+    source: "course-overlaps",
+    layout: { "line-cap": "butt" },
+    paint: { "line-color": ["get", "color"], "line-width": 4, "line-opacity": 0.9 },
+  });
+  // Arrows follow whole courses so their spacing does not restart at every segment.
+  map.addLayer({
+    id: "course-arrows",
+    type: "symbol",
+    source: "course-lines",
+    layout: {
+      "symbol-placement": "line",
+      "symbol-spacing": 120,
+      "icon-image": `${ICON_PREFIX}arrow`,
+      "icon-size": 1,
+      "icon-allow-overlap": true,
+      "icon-ignore-placement": true,
+    },
+  });
   map.addLayer({ id: "vertices", type: "circle", source: "vertices", paint: { "circle-radius": 4, "circle-color": "#fff", "circle-stroke-color": ["get", "color"], "circle-stroke-width": 2 } });
+  map.addLayer({
+    id: "course-ends",
+    type: "symbol",
+    source: "course-ends",
+    layout: { "icon-image": ["concat", ICON_PREFIX, ["get", "kind"]], "icon-size": 1, "icon-allow-overlap": true, "icon-ignore-placement": true },
+  });
   map.addLayer({ id: "spectator", type: "circle", source: "spectator", paint: { "circle-radius": 8, "circle-color": ["get", "color"], "circle-stroke-color": "#fff", "circle-stroke-width": 2 } });
   map.addLayer({
     id: "replay-lines",
@@ -95,14 +141,19 @@ export function render(map, event, itinerary, editingCourse = null) {
   if (!map.getSource("courses")) return;
   const courses = [];
   const vertices = [];
+  const shapes = [];
   event.courses.forEach((course, i) => {
     const color = COURSE_COLORS[i % COURSE_COLORS.length];
+    shapes.push({ points: course.segments.flatMap((s) => s.points), color });
     course.segments.forEach((segment) => {
       if (segment.points.length >= 2) courses.push(feature(lineOf(segment.points), { color }));
       if (i === editingCourse) segment.points.forEach((p) => vertices.push(feature(pointOf(p), { color })));
     });
   });
   map.getSource("courses").setData(collection(courses));
+  map.getSource("course-lines").setData(collection(shapes.filter((s) => s.points.length >= 2).map((s) => feature(lineOf(s.points)))));
+  map.getSource("course-overlaps").setData(collection(overlapChunks(shapes).map((c) => feature(lineOf(c.path), { color: c.color }))));
+  map.getSource("course-ends").setData(collection(courseEnds(shapes).map((e) => feature(pointOf(e.location), { kind: e.kind }))));
   map.getSource("vertices").setData(collection(vertices));
 
   const spectator = [];

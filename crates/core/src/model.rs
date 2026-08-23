@@ -103,6 +103,9 @@ pub struct SpectatorConfig {
     #[serde(default)]
     pub end: Option<Deadline>,
     pub mode: TravelMode,
+    /// The spectator's own pace on ordinary ways; a typical one for the mode when absent.
+    #[serde(default)]
+    pub speed_mps: Option<f64>,
     #[serde(default = "default_sighting_radius_m")]
     pub sighting_radius_m: f64,
     /// How long before a racer could possibly appear the spectator must already be in place.

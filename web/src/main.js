@@ -262,6 +262,11 @@ const actions = {
       regionRadius: () => (s.required_regions[gi].radius_m = number),
       travel: () => {
         s.mode = input.value;
+        s.speed_mps = null;
+        ui.network = null;
+      },
+      speed: () => {
+        s.speed_mps = input.value ? number / state.KMH_PER_MPS : null;
         ui.network = null;
       },
       radius: () => (s.sighting_radius_m = number),
@@ -297,6 +302,7 @@ function download(filename, text, type) {
 }
 
 async function buildNetwork() {
-  ui.network = await engine.call("network", { osm: ui.osm, origin: event.origin, mode: event.spectator.mode });
+  const { mode, speed_mps } = event.spectator;
+  ui.network = await engine.call("network", { osm: ui.osm, origin: event.origin, mode, speed: speed_mps });
   return `Network: ${ui.network.nodes} nodes, ${ui.network.edges} edges.`;
 }

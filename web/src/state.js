@@ -3,6 +3,9 @@
 const DEFAULT_PACE_S_PER_KM = { run: 360, bike: 100, swim: 1200, other: 360 };
 const DEFAULT_UNCERTAINTY = 0.05;
 const DEFAULT_REGION_RADIUS_M = 100;
+/** Typical speeds per travel mode, matching the routing profiles; shown when the spectator sets none. */
+export const DEFAULT_SPEED_KMH = { walk: 4.7, bike: 16 };
+export const KMH_PER_MPS = 3.6;
 
 export function newEvent(center) {
   return {
@@ -16,6 +19,7 @@ export function newEvent(center) {
       latest: null,
       end: null,
       mode: "walk",
+      speed_mps: null,
       sighting_radius_m: 30,
       safety_buffer_s: 120,
       min_stop_s: 60,

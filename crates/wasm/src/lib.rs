@@ -3,6 +3,7 @@
 use birdeye_core::geom::{Point, Projection};
 use birdeye_core::{Event, TravelMode};
 use birdeye_plan::Options;
+use birdeye_routing::profile::default_speed;
 use birdeye_routing::{Graph, Osm, TravelTime};
 use serde::Deserialize;
 use wasm_bindgen::prelude::*;
@@ -43,13 +44,21 @@ pub struct Network {
 
 #[wasm_bindgen]
 impl Network {
-    /// `osm_json` is an Overpass response; `origin_json` is the event origin `{lat, lon}`.
+    /// `osm_json` is an Overpass response; `origin_json` is the event origin `{lat, lon}`;
+    /// `speed_mps` is the spectator's pace, or a typical one for the mode when absent.
     #[wasm_bindgen(constructor)]
-    pub fn new(osm_json: &str, origin_json: &str, mode: &str) -> Result<Network, JsError> {
+    pub fn new(
+        osm_json: &str,
+        origin_json: &str,
+        mode: &str,
+        speed_mps: Option<f64>,
+    ) -> Result<Network, JsError> {
         let osm = Osm::parse(osm_json)?;
         let origin = serde_json::from_str(origin_json)?;
         let mode: TravelMode = serde_json::from_str(&format!("\"{mode}\""))?;
-        Ok(Network { graph: Graph::build(&osm, &Projection::new(origin), mode), mode })
+        let speed = speed_mps.unwrap_or_else(|| default_speed(mode));
+        let graph = Graph::build(&osm, &Projection::new(origin), mode, speed);
+        Ok(Network { graph, mode })
     }
 
     pub fn node_count(&self) -> usize {

@@ -265,6 +265,7 @@ mod tests {
                 latest: None,
                 end: None,
                 mode: TravelMode::Walk,
+                speed_mps: None,
                 sighting_radius_m: 30.0,
                 safety_buffer_s: 10.0,
                 min_stop_s: 0.0,
