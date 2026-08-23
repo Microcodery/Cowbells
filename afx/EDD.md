@@ -108,7 +108,7 @@ No time stepping anywhere; every window is closed-form. This was a deliberate si
 
 ### Input
 
-An Overpass JSON document for the event bounding box (courses + spectator start/end, padded ~500 m). The web shell obtains it; the crate only parses. Two sources, same format:
+An Overpass JSON document for the event area: the convex hull of the courses and the spectator start/end, padded ~100 m (a loop's interior stays fetchable for crossing). The web shell obtains it; the crate only parses. Two sources, same format:
 
 1. **Pre-baked extract** (primary): an extract saved alongside the event (`event.osm` in the save file or a sibling download). Produced by the same fetch, then exported. Shared events carry their extract so race-morning spectators never hit Overpass.
 2. **Live Overpass** (fallback/authoring): fetched on demand, cached in IndexedDB, with instance rotation and backoff. Public instances allow ~2 concurrent slots per IP (RESEARCH.md §2e), so this is an authoring-time path, not a crowd path.
@@ -122,7 +122,7 @@ The query ends with `out body; >; out skel qt;` so nodes arrive as separate elem
 ### Graph
 
 - Nodes: OSM nodes on kept ways. Edges: consecutive way nodes, weight `length / speed(mode, tags)`. The spectator's own `speed_mps` sets the walking or cycling pace (stairs at half of it); defaults are walk 1.3 m/s, bike 4.5 m/s; driving follows `maxspeed` or a class table.
-- **Open-area shortcuts:** for each walkable polygon, collect graph nodes inside or on its boundary; add an edge between each pair whose connecting segment lies entirely inside the polygon (point-in-polygon on endpoints plus no intersection with the ring). Quadratic per polygon; polygons with more than `N` nodes (configurable, default 200) use a k-nearest (k=8) restriction. Only for walk and bike.
+- **Open-area shortcuts:** for each walkable polygon, collect graph nodes inside or on its boundary; add an edge from each node to its k=8 nearest neighbours inside the polygon when the connecting segment lies entirely inside it (no intersection with the ring); chords chain, so a full mesh is not needed. Polygons spanning under ~60 m are skipped — a chord across one saves seconds, and city extracts hold thousands of them. Only for walk and bike.
 - **Course closure** (opt-in): remove edges whose segment intersects any course polyline. Coarse but honest; the user controls it.
 - Spatial index: `rstar` r-tree over nodes and over edges for snapping.
 
@@ -199,7 +199,7 @@ Plain ES-module JavaScript, no framework, Vite for dev server and bundling only.
 - **Map:** MapLibre GL JS with a free vector tile style (default OpenFreeMap, self-host-able Protomaps as the fallback; see RESEARCH.md §2d). Light and dark map styles follow the theme. Drawing via a small custom controller (click to add, drag to move, split/merge handles) — drawing plugins are evaluated in RESEARCH.md; the custom path is the fallback.
 - **State:** a single `event` object mirroring the Rust model, mutated through a handful of reducer-style functions; every mutation re-renders the affected layer and debounces auto-save to `localStorage`.
 - **GPX:** parsed in Rust (`gpx` crate) via the WASM facade to avoid two parsers.
-- **OSM data:** pre-baked extract from the save file if present; otherwise bbox computed from the event, query built per travel mode, response cached in IndexedDB keyed by `(bbox, mode, query-version)` and offered for export.
+- **OSM data:** pre-baked extract from the save file if present; otherwise the padded hull computed from the event, response cached in IndexedDB with the hull it covers and offered for export.
 - **Worker protocol:** `{type: "plan", event, osm, options}` → progress messages → `{type: "result", itinerary}` or `{type: "error", ...}`. The worker owns the WASM instance; the graph is built once per OSM payload and reused across plans.
 - **Share URL:** event JSON → deflate → base64url in the fragment; refuse above ~8 KB with a prompt to download instead.
 

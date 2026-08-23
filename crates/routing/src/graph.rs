@@ -17,9 +17,12 @@ use crate::profile::{Direction, Passage, is_open_area, open_area_speed, passage}
 
 pub type NodeId = usize;
 
-/// Open areas with more nodes than this only get shortcuts to each node's nearest neighbours.
-const OPEN_AREA_FULL_MESH_LIMIT: usize = 200;
+/// Each node in an open area gets shortcuts to this many nearest neighbours inside it; a full
+/// mesh is quadratic and buys nothing once chords can chain.
 const OPEN_AREA_NEIGHBOURS: usize = 8;
+/// A chord saves at most the area's span; below this (a corner parking lot) that is seconds,
+/// and city extracts hold thousands of them.
+const MIN_OPEN_AREA_SPAN_M: f64 = 60.0;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct Edge {
@@ -82,7 +85,13 @@ impl Graph {
                     .filter_map(|id| osm.nodes.get(id))
                     .map(|&p| projection.to_local(p))
                     .collect();
-                graph.add_open_area(&Polygon::new(LineString::from(ring), vec![]), speed);
+                let polygon = Polygon::new(LineString::from(ring), vec![]);
+                let spans = polygon.bounding_rect().is_some_and(|r| {
+                    Euclidean.distance(Point::from(r.min()), Point::from(r.max())) >= MIN_OPEN_AREA_SPAN_M
+                });
+                if spans {
+                    graph.add_open_area(&polygon, speed);
+                }
             }
         }
         graph
@@ -170,13 +179,8 @@ impl Graph {
             inside.iter().map(|&id| Indexed::new(coords(self.points[id]), id)).collect(),
         );
         for &a in &inside {
-            let partners: Vec<NodeId> = if inside.len() <= OPEN_AREA_FULL_MESH_LIMIT {
-                inside.iter().copied().filter(|&b| b > a).collect()
-            } else {
-                let nearest = local.nearest_neighbor_iter(coords(self.points[a])).skip(1);
-                nearest.take(OPEN_AREA_NEIGHBOURS).map(|n| n.data).collect()
-            };
-            for b in partners {
+            let nearest = local.nearest_neighbor_iter(coords(self.points[a])).map(|n| n.data);
+            for b in nearest.filter(|&b| b != a).take(OPEN_AREA_NEIGHBOURS) {
                 if !self.has_edge(a, b) && chord_inside(polygon, self.points[a], self.points[b]) {
                     self.add_edge_both_ways(a, b, self.distance(a, b) / metres_per_second);
                 }
@@ -487,6 +491,28 @@ mod tests {
         let at = |id: i64| g.snap(proj.to_local(osm.nodes[&id]), 1.0).unwrap();
         assert_eq!(g.time(at(1), at(3)), None, "must not bridge the gap");
         assert!(g.time(at(1), at(7)).is_some());
+    }
+
+    const TINY_LOT: &str = r#"{"elements": [
+        {"type": "node", "id": 1, "lat": 45.0, "lon": -122.0},
+        {"type": "node", "id": 2, "lat": 45.0, "lon": -121.9996},
+        {"type": "node", "id": 3, "lat": 45.0003, "lon": -122.0},
+        {"type": "way", "id": 10, "nodes": [1, 2, 3], "tags": {"highway": "footway"}},
+        {"type": "way", "id": 11, "nodes": [1, 2, 3, 1], "tags": {"amenity": "parking"}}
+    ]}"#;
+
+    #[test]
+    fn tiny_lots_get_no_shortcuts() {
+        let proj = Projection::new(LatLon { lat: 45.0, lon: -122.0 });
+        let osm = Osm::parse(TINY_LOT).unwrap();
+        let g = Graph::build(&osm, &proj, TravelMode::Walk, 1.0);
+        let at = |id: i64| g.snap(proj.to_local(osm.nodes[&id]), 1.0).unwrap();
+        let (a, b, c) = (at(1), at(2), at(3));
+        assert_abs_diff_eq!(
+            g.time(a, c).unwrap(),
+            g.distance(a, b) + g.distance(b, c),
+            epsilon = 1e-9
+        );
     }
 
     #[test]
