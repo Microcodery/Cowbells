@@ -25,7 +25,7 @@ function transact(mode, act) {
   );
 }
 
-/** `{ osm, box }` for the current event, or null. Never throws: storage is a convenience. */
+/** `{ osm, area }` for the current event (the Overpass text and the hull it covers), or null. Never throws: storage is a convenience. */
 export async function loadMapData() {
   try {
     return (await transact("readonly", (store) => store.get(KEY))) ?? null;

@@ -5,7 +5,7 @@ import { createMap, currentTheme, fitTo, flyTo, mapCenter, render as renderMap, 
 import { loadMapData, saveMapData } from "./store.js";
 import { overlay } from "./overlay.js";
 import { liveReplay } from "./replay.js";
-import { bbox, covers, fetchOsm } from "./overpass.js";
+import { area, covers, fetchOsm } from "./overpass.js";
 import { esc, renderHeader, renderPanel } from "./panel.js";
 import * as state from "./state.js";
 
@@ -41,7 +41,7 @@ const ui = {
   network: null,
   osm: null,
   // The area `osm` was fetched for; courses outside it trigger a new fetch.
-  osmBox: null,
+  osmArea: null,
   status: "Draw a course to begin.",
   busy: false,
   beam: 64,
@@ -73,9 +73,9 @@ map.once("layers-ready", restoreMapData);
 async function restoreMapData() {
   if (!hasCourse()) return;
   const saved = await loadMapData();
-  if (saved && covers(saved.box, bbox(event))) {
+  if (saved && covers(saved.area, area(event))) {
     ui.osm = saved.osm;
-    ui.osmBox = saved.box;
+    ui.osmArea = saved.area;
     narrate(await buildNetwork());
     draw();
   } else {
@@ -154,8 +154,8 @@ const hasCourse = () => event.courses.some((c) => c.segments.some((s) => s.point
 /** Fetches map data for the courses in the background unless the extract in hand already covers them. */
 function ensureMapData() {
   if (mapDataFetch || !hasCourse()) return mapDataFetch;
-  const needed = bbox(event);
-  if (covers(ui.osmBox, needed)) return null;
+  const needed = area(event);
+  if (covers(ui.osmArea, needed)) return null;
   // The projection is centred on the courses so distances stay true across the whole event.
   event.origin = state.courseCenter(event, mapCenter(map));
   narrate("Fetching map data…");
@@ -163,9 +163,9 @@ function ensureMapData() {
     try {
       const osm = await fetchOsm(event);
       ui.osm = osm;
-      ui.osmBox = needed;
+      ui.osmArea = needed;
       ui.network = null;
-      saveMapData({ osm, box: needed });
+      saveMapData({ osm, area: needed });
       narrate(await buildNetwork());
     } catch (err) {
       narrate(`Map data: ${err.message}`);
@@ -378,8 +378,8 @@ const actions = {
       if (!state.looksLikeEvent(loaded)) throw new Error("not a .bird event file");
       event = loaded;
       ui.osm = saved.osm ?? null;
-      ui.osmBox = ui.osm ? bbox(event) : null;
-      saveMapData(ui.osm ? { osm: ui.osm, box: ui.osmBox } : null);
+      ui.osmArea = ui.osm ? area(event) : null;
+      saveMapData(ui.osm ? { osm: ui.osm, area: ui.osmArea } : null);
       ui.network = null;
       ui.itinerary = null;
       showCourses();
@@ -399,8 +399,8 @@ const actions = {
       // Examples are demos: let them show what Plus allows.
       if (state.overTierLimit(event, ui.tier)) actions.toggleTier();
       ui.osm = saved.osm ?? null;
-      ui.osmBox = ui.osm ? bbox(event) : null;
-      saveMapData(ui.osm ? { osm: ui.osm, box: ui.osmBox } : null);
+      ui.osmArea = ui.osm ? area(event) : null;
+      saveMapData(ui.osm ? { osm: ui.osm, area: ui.osmArea } : null);
       ui.network = null;
       ui.itinerary = null;
       showCourses();
@@ -432,7 +432,7 @@ const actions = {
   reset() {
     if (!confirm("Start over? This clears the courses, racers, settings, and fetched map data.")) return;
     event = state.newEvent(mapCenter(map));
-    Object.assign(ui, { osm: null, osmBox: null, network: null, itinerary: null, alternatives: null, tool: null, banner: null, status: "Draw a course to begin." });
+    Object.assign(ui, { osm: null, osmArea: null, network: null, itinerary: null, alternatives: null, tool: null, banner: null, status: "Draw a course to begin." });
     localStorage.removeItem(STORAGE_KEY);
     saveMapData(null);
     planGeneration++;
