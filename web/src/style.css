@@ -129,6 +129,40 @@ h2 {
   min-width: 80px;
 }
 
+/* One field per line: name on the left, control on the right. */
+.fields {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.fields > label {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.fields > label > input,
+.fields > label > select,
+.fields > label > span {
+  flex: 0 1 60%;
+  min-width: 0;
+}
+
+.fields > label > span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
+.fields > label > span > input {
+  flex: 1;
+  min-width: 0;
+}
+
 input,
 select,
 button,
@@ -208,7 +242,15 @@ details.section > summary h2 {
 
 details[data-section="settings"] label {
   display: flex;
-  margin: 4px 0;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 6px 0;
+}
+
+details[data-section="settings"] label > input,
+details[data-section="settings"] label > select {
+  flex: 0 1 50%;
+  min-width: 0;
 }
 
 .muted {
@@ -219,12 +261,70 @@ details[data-section="settings"] label {
   color: var(--warn);
 }
 
+#menu,
+#mapstatus {
+  display: none;
+  position: absolute;
+  z-index: 6;
+}
+
+.phone-only {
+  display: none;
+}
+
+/* Phones: the map fills the screen; the panel opens over it from the menu button. */
 @media (max-width: 700px) {
   body {
-    grid-template-columns: 1fr;
-    grid-template-rows: 50vh 50vh;
+    display: block;
+    height: 100dvh;
   }
   #map {
-    height: 50vh;
+    height: 100dvh;
+  }
+  #panel {
+    position: fixed;
+    inset: 0;
+    z-index: 10;
+    border-right: 0;
+    display: none;
+  }
+  body.panel-open #panel {
+    display: block;
+  }
+  #menu {
+    display: block;
+    top: 10px;
+    left: 10px;
+    font-size: 20px;
+    line-height: 1;
+    padding: 6px 10px;
+  }
+  #mapstatus {
+    display: block;
+    left: 56px;
+    right: 56px;
+    top: 12px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 8px;
+    font-size: 13px;
+  }
+  #mapstatus[hidden] {
+    display: none;
+  }
+  .phone-only {
+    display: inline-block;
+  }
+  header {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  input,
+  select,
+  button,
+  .button {
+    font-size: 16px;
+    min-height: 36px;
   }
 }

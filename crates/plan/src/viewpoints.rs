@@ -79,6 +79,19 @@ pub fn raw_viewpoints(
     graph: &impl TravelTime,
     projection: &Projection,
 ) -> Vec<Viewpoint> {
+    raw_viewpoints_with(event, graph, projection, &mut |_| {})
+}
+
+/// Candidates are reported to `found` in chunks as they turn up.
+const CANDIDATE_CHUNK: usize = 400;
+
+/// `raw_viewpoints`, calling `found` with each chunk of candidates as the network is scanned.
+pub fn raw_viewpoints_with(
+    event: &Event,
+    graph: &impl TravelTime,
+    projection: &Projection,
+    found: &mut dyn FnMut(&[Viewpoint]),
+) -> Vec<Viewpoint> {
     let (samples, index) = sample_courses(event, projection);
     let courses: Vec<Vec<Polyline>> =
         event.courses.iter().map(|c| c.polylines(projection)).collect();
@@ -86,25 +99,35 @@ pub fn raw_viewpoints(
         courses.iter().flatten().any(|line| line.nearest(point).offset < CLEARANCE_M)
     };
     let radius = event.spectator.sighting_radius_m;
-    (0..graph.node_count())
-        .filter_map(|node| {
-            let point = graph.point(node);
-            if in_roadway(point) {
-                return None;
-            }
-            let seen: Vec<(&CourseSample, f64)> = index
-                .locate_within_distance(coords(point), radius * radius)
-                .map(|s| {
-                    (
-                        &samples[s.data],
-                        Euclidean.distance(point, Point::new(s.geom()[0], s.geom()[1])),
-                    )
-                })
-                .collect();
-            let arcs = arcs(seen);
-            (!arcs.is_empty()).then(|| Viewpoint { node, point, arcs, sightings: Vec::new() })
-        })
-        .collect()
+    let mut all = Vec::new();
+    let mut reported = 0;
+    for node in 0..graph.node_count() {
+        let point = graph.point(node);
+        let seen: Vec<(&CourseSample, f64)> = index
+            .locate_within_distance(coords(point), radius * radius)
+            .map(|s| {
+                (&samples[s.data], Euclidean.distance(point, Point::new(s.geom()[0], s.geom()[1])))
+            })
+            .collect();
+        // The exact clearance test is costly; only nodes near a sample can be in the roadway.
+        let nearest = seen.iter().map(|s| s.1).fold(f64::INFINITY, f64::min);
+        if nearest < CLEARANCE_M + SAMPLE_SPACING_M / 2.0 && in_roadway(point) {
+            continue;
+        }
+        let arcs = arcs(seen);
+        if arcs.is_empty() {
+            continue;
+        }
+        all.push(Viewpoint { node, point, arcs, sightings: Vec::new() });
+        if all.len() - reported >= CANDIDATE_CHUNK {
+            found(&all[reported..]);
+            reported = all.len();
+        }
+    }
+    if reported < all.len() {
+        found(&all[reported..]);
+    }
+    all
 }
 
 /// Each racer's visibility window at every arc of every viewpoint.

@@ -2,7 +2,7 @@ import "./style.css";
 import { createEngine } from "./engine.js";
 import { itineraryToGpx } from "./gpx.js";
 import { createMap, currentTheme, flyTo, mapCenter, render as renderMap, replayCanvas, revealItinerary, setHover, setTheme } from "./map.js";
-import { replay } from "./replay.js";
+import { liveReplay } from "./replay.js";
 import { fetchOsm } from "./overpass.js";
 import { esc, renderPanel } from "./panel.js";
 import * as state from "./state.js";
@@ -22,8 +22,6 @@ const ui = {
   status: "Draw a course to begin.",
   busy: false,
   beam: 64,
-  replaySeconds: 6,
-  replaying: null,
   unit: state.UNITS[localStorage.getItem(UNITS_KEY)] ?? state.UNITS.km,
   // `null` while alternatives are still being explored; then the ones that beat the plan.
   alternatives: null,
@@ -33,12 +31,18 @@ let planGeneration = 0;
 let event = loadSaved() ?? state.newEvent(DEFAULT_CENTER);
 const map = createMap("map", event.origin, onMapClick, onMapHover);
 const hoverTip = document.getElementById("hover");
+const mapStatus = document.getElementById("mapstatus");
+document.getElementById("menu").onclick = () => document.body.classList.toggle("panel-open");
+/** On phones the panel covers the map; planning closes it so the progress is visible. */
+const closePanelOnPhones = () => matchMedia("(max-width: 700px)").matches && document.body.classList.remove("panel-open");
 map.on("layers-ready", draw);
 window.birdeye = { map, event: () => event };
 
 let autosave;
 function draw() {
   renderPanel(panel, event, ui, actions);
+  mapStatus.textContent = ui.status;
+  mapStatus.hidden = !ui.status;
   renderMap(map, event, ui.itinerary, ui.tool?.courseIndex ?? null);
   clearTimeout(autosave);
   autosave = setTimeout(() => localStorage.setItem(STORAGE_KEY, JSON.stringify(event)), AUTOSAVE_DELAY_MS);
@@ -69,10 +73,6 @@ function rebuildNetwork() {
 }
 
 function onMapClick(latlon) {
-  if (ui.replaying) {
-    ui.replaying.skip = true;
-    return;
-  }
   const tool = ui.tool;
   if (!tool) return;
   mutate(() => {
@@ -268,15 +268,20 @@ const actions = {
       ui.status = await buildNetwork();
     });
   },
+  closePanel() {
+    document.body.classList.remove("panel-open");
+  },
   async plan() {
     let planned = false;
+    closePanelOnPhones();
     await run("Planning…", async () => {
       const problems = await engine.call("validate", { event });
       if (problems.length) throw new Error(problems.join("; "));
-      const { itinerary, trace } = await engine.call("plan", { event, options: { beam: ui.beam, trace: true } });
-      // The previous itinerary fades out before the replay and the new one fades in after it.
+      // The previous itinerary fades out while the engine's progress plays, and the new one fades in after.
       revealItinerary(map, false);
-      await replayTrace(trace);
+      const live = liveReplay(replayCanvas(map), event.spectator.sighting_radius_m, narrate);
+      const itinerary = await engine.call("plan", { event, options: { beam: ui.beam, trace: true } }, live.push);
+      await live.finish();
       ui.itinerary = itinerary;
       ui.alternatives = null;
       ui.status = `${state.planSummary(event, itinerary)}.`;
@@ -295,9 +300,6 @@ const actions = {
       ui.alternatives = [];
       ui.status = `${state.planSummary(event, itinerary)}. ${await buildNetwork()}`;
     });
-  },
-  skipReplay() {
-    if (ui.replaying) ui.replaying.skip = true;
   },
   edit({ field, ci, si, ri, ii, gi }, input) {
     const course = event.courses[ci];
@@ -339,7 +341,6 @@ const actions = {
       requireFinishes: () => (s.objective.require_finishes = input.checked),
       courseClosed: () => (s.course_closed = input.checked),
       beam: () => (ui.beam = number),
-      replaySeconds: () => (ui.replaySeconds = number),
     };
     mutate(() => edits[field]?.());
   },
@@ -369,17 +370,12 @@ async function exploreAlternatives(generation) {
   draw();
 }
 
-async function replayTrace(trace) {
-  ui.replaying = { skip: false };
-  renderPanel(panel, event, ui, actions);
-  // Status changes every frame; rebuilding the whole panel that often would drop input focus.
-  const narrate = (text) => {
-    ui.status = text;
-    panel.querySelector("[data-status]").textContent = text;
-  };
-  const radius = event.spectator.sighting_radius_m;
-  await replay(trace, replayCanvas(map), radius, () => ui.replaySeconds, narrate, ui.replaying);
-  ui.replaying = null;
+/** Status changes every frame during planning; rebuilding the whole panel that often would drop input focus. */
+function narrate(text) {
+  ui.status = text;
+  const status = panel.querySelector("[data-status]");
+  if (status) status.textContent = text;
+  mapStatus.textContent = text;
 }
 
 function download(filename, text, type) {

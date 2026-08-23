@@ -14,9 +14,9 @@ struct Expected {
 }
 
 const EXPECTED: &[Expected] = &[
-    Expected { name: "downtown-loop", seen_en_route: 2, finished: 2, racers: 2, stops: 3 },
-    Expected { name: "three-distances", seen_en_route: 5, finished: 2, racers: 5, stops: 3 },
-    Expected { name: "hawthorne-belmont", seen_en_route: 6, finished: 3, racers: 6, stops: 3 },
+    Expected { name: "downtown-loop", seen_en_route: 2, finished: 2, racers: 2, stops: 2 },
+    Expected { name: "three-distances", seen_en_route: 2, finished: 5, racers: 5, stops: 2 },
+    Expected { name: "hawthorne-belmont", seen_en_route: 3, finished: 6, racers: 6, stops: 2 },
 ];
 
 fn plan(name: &str) -> (Value, Value) {
@@ -32,9 +32,8 @@ fn plan(name: &str) -> (Value, Value) {
         spectator["speed_mps"].as_f64(),
     )
     .unwrap();
-    let solution: Value =
-        serde_json::from_str(&network.plan(&event.to_string(), "{}").unwrap()).unwrap();
-    (event.clone(), solution["itinerary"].clone())
+    let json = network.plan_with(&event.to_string(), "{}", &mut |_| {}).unwrap();
+    (event.clone(), serde_json::from_str(&json).unwrap())
 }
 
 #[test]

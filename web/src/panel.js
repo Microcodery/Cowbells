@@ -28,6 +28,7 @@ export function renderPanel(root, event, ui, actions) {
         <label class="button" title="Load a .bird event">Load<input type="file" accept=".bird,.json" data-act="load" hidden ${ui.busy ? "disabled" : ""}></label>
         <label class="button" title="Import courses from GPX">GPX<input type="file" accept=".gpx" data-act="gpx" hidden ${ui.busy ? "disabled" : ""}></label>
         <button data-act="theme" title="Light or dark">◐</button>
+        <button data-act="closePanel" class="phone-only" title="Back to the map">✕</button>
         <button data-act="units" title="Switch units">${ui.unit.label}</button>
       </div>
     </header>
@@ -44,7 +45,7 @@ export function renderPanel(root, event, ui, actions) {
         <button data-act="fetch" ${ui.busy ? "disabled" : ""}>Fetch map data</button>
         <button data-act="plan" ${ui.busy || !ui.network ? "disabled" : ""}>Plan</button>
       </div>
-      <p class="muted"><span data-status>${esc(ui.status)}</span> ${ui.replaying ? `<button data-act="skipReplay">Skip</button>` : ""}</p>
+      <p class="muted"><span data-status>${esc(ui.status)}</span></p>
       ${ui.itinerary ? results(ui.itinerary, event, ui) : ""}
     </section>`;
   for (const details of root.querySelectorAll("details[data-section]")) {
@@ -69,16 +70,18 @@ export function renderPanel(root, event, ui, actions) {
 
 function coursesSection(event, ui) {
   const tool = (kind, index) => ui.tool?.kind === kind && ui.tool.courseIndex === index;
-  return `<details class="section" data-section="courses" open>
+  return `<details class="section" data-section="courses">
     <summary><h2>Courses <button data-act="addCourse">+</button></h2></summary>
     ${event.courses
       .map(
         (course, ci) => `<div class="card">
       <div class="row">
         <input data-field="courseName" data-ci="${ci}" value="${esc(course.name)}">
-        <input type="time" data-field="courseStart" data-ci="${ci}" value="${state.clock(course.start_time)}">
-        <span class="muted">${state.distanceLabel(state.courseLength(course), ui.unit)}</span>
         <button data-act="removeCourse" data-ci="${ci}" title="Remove course">${TRASH}</button>
+      </div>
+      <div class="fields">
+        <label>starts <input type="time" data-field="courseStart" data-ci="${ci}" value="${state.clock(course.start_time)}"></label>
+        <label>length <span class="muted">${state.distanceLabel(state.courseLength(course), ui.unit)}</span></label>
       </div>
       <div class="row">
         ${toolButton("draw", tool("draw", ci), "Draw", "Drawing… (click map)", `data-ci="${ci}"`)}
@@ -105,7 +108,7 @@ function coursesSection(event, ui) {
 
 function racersSection(event, ui) {
   if (event.courses.length === 0) return "";
-  return `<details class="section" data-section="racers" open>
+  return `<details class="section" data-section="racers">
     <summary><h2>Racers <button data-act="addRacer">+</button></h2></summary>
     ${event.racers
       .map(
@@ -113,15 +116,14 @@ function racersSection(event, ui) {
       <summary><b>${esc(racer.name)}</b> <span class="muted">${esc(event.courses.find((c) => c.id === racer.course_id)?.name ?? "")} · ${state.paceLabel(racer.pace_profile[0]?.seconds_per_km ?? 0, ui.unit)}/${ui.unit.label}</span></summary>
       <div class="row">
         <input data-field="racerName" data-ri="${ri}" value="${esc(racer.name)}">
-        <select data-field="racerCourse" data-ri="${ri}">${event.courses.map((c) => `<option value="${c.id}" ${c.id === racer.course_id ? "selected" : ""}>${esc(c.name)}</option>`).join("")}</select>
         <button data-act="removeRacer" data-ri="${ri}" title="Remove racer">${TRASH}</button>
       </div>
-      <div class="row">
-        <label>offset <input type="number" data-field="racerOffset" data-ri="${ri}" value="${racer.start_offset_s / 60}" step="1" size="4"> min</label>
+      <div class="fields">
+        <label>course <select data-field="racerCourse" data-ri="${ri}">${event.courses.map((c) => `<option value="${c.id}" ${c.id === racer.course_id ? "selected" : ""}>${esc(c.name)}</option>`).join("")}</select></label>
+        <label>start offset <span><input type="number" data-field="racerOffset" data-ri="${ri}" value="${racer.start_offset_s / 60}" step="1" size="4"> min</span></label>
         <label>priority <input type="number" data-field="racerPriority" data-ri="${ri}" value="${racer.priority}" step="0.5" min="0" size="3"></label>
         <label>prefer <select data-field="racerPrefer" data-ri="${ri}" title="which sighting of this racer matters most">
-          <option value="en_route" ${racer.prefer === "finish" ? "" : "selected"}>during</option>
-          <option value="finish" ${racer.prefer === "finish" ? "selected" : ""}>finish</option>
+          ${options(["finish", "neutral", "en_route"], racer.prefer ?? "finish", { finish: "the finish", neutral: "during, then finish", en_route: "during, always" })}
         </select></label>
       </div>
       <div class="paces">
@@ -146,15 +148,17 @@ function racersSection(event, ui) {
 function spectatorSection(event, ui) {
   const s = event.spectator;
   const tool = (kind) => ui.tool?.kind === kind;
-  return `<details class="section" data-section="spectator" open>
+  return `<details class="section" data-section="spectator">
     <summary><h2>Spectator</h2></summary>
     <div class="row">
       ${toolButton("setStart", tool("start"), s.start ? "Move start" : "Set start", "Click the map")}
       ${s.start ? `<button data-act="clearStart" title="Remove start; the planner chooses">${TRASH}</button>` : `<span class="muted">planner chooses</span>`}
+    </div>
+    <div class="fields">
       <label>from <input type="time" data-field="earliest" value="${state.clock(s.earliest)}"></label>
       <label>until <input type="time" data-field="latest" value="${s.latest ? state.clock(s.latest) : ""}"></label>
-      <select data-field="travel">${options(TRAVEL, s.mode)}</select>
-      ${s.mode === "drive" ? "" : `<label>at <input type="number" data-field="speed" value="${s.speed_mps ? state.speedLabel(s.speed_mps, ui.unit) : ""}" placeholder="${state.speedLabel(state.DEFAULT_SPEED_MPS[s.mode], ui.unit)}" min="0.5" step="0.5" size="4" title="your pace on ordinary streets; blank for a typical one"> ${ui.unit.speed}</label>`}
+      <label>travel <select data-field="travel">${options(TRAVEL, s.mode)}</select></label>
+      ${s.mode === "drive" ? "" : `<label>speed <span><input type="number" data-field="speed" value="${s.speed_mps ? state.speedLabel(s.speed_mps, ui.unit) : ""}" placeholder="${state.speedLabel(state.DEFAULT_SPEED_MPS[s.mode], ui.unit)}" min="0.5" step="0.5" size="4" title="your pace on ordinary streets; blank for a typical one"> ${ui.unit.speed}</span></label>`}
     </div>
     <div class="row">
       ${toolButton("setEnd", tool("end"), s.end ? "Move end" : "Set end", "Click the map")}
@@ -188,7 +192,6 @@ function settingsSection(event, ui) {
       <label>breadth ↔ depth <input type="range" data-field="decay" value="${s.objective.repeat_decay}" min="0" max="0.9" step="0.1" title="How much each repeat sighting of a racer is worth relative to the previous one"></label>
       <label><input type="checkbox" data-field="courseClosed" ${s.course_closed ? "checked" : ""}> course closed to crossing</label>
       <label>search effort <select data-field="beam">${options(["16", "64", "256"], String(ui.beam))}</select></label>
-      <label>replay length <input type="range" data-field="replaySeconds" value="${ui.replaySeconds}" min="1" max="60" step="1" title="seconds to animate the planner's steps after each plan; click the map to skip"> ${ui.replaySeconds}s</label>
   </details>`;
 }
 
@@ -237,7 +240,8 @@ const toolButton = (act, active, idle, working, extra = "") =>
 /** A trash-can glyph for remove buttons, so removing never looks like closing. */
 const TRASH = `<svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" d="M2.5 4h11M6.5 4V2.5h3V4M4 4l.7 9.5h6.6L12 4M6.5 7v4M9.5 7v4"/></svg>`;
 
-const options = (values, selected) => values.map((v) => `<option ${v === selected ? "selected" : ""}>${v}</option>`).join("");
+const options = (values, selected, labels = {}) =>
+  values.map((v) => `<option value="${v}" ${v === selected ? "selected" : ""}>${labels[v] ?? v}</option>`).join("");
 
 export function esc(text) {
   return String(text).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);

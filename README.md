@@ -22,7 +22,9 @@ Runs entirely in the browser as a static page: no account, no backend.
   breadth-vs-depth dial. Distances and paces display in km or miles.
 - **Map:** courses drawn with start/finish markers and direction arrows;
   stretches shared by several courses striped in their colours. After each
-  plan the viewpoints, their clustering, and the search replay on the map.
+  plan the engine streams its progress to the map — viewpoints, clustering,
+  then the search with the best plan so far lit up — paced to take at least
+  three seconds so there is always something to watch.
 - **Routing:** OpenStreetMap roads and paths fetched on demand; never crosses
   water or buildings; straight lines allowed through parks and open areas.
   Roads the race runs on are off limits to the spectator, who keeps to
@@ -32,7 +34,8 @@ Runs entirely in the browser as a static page: no account, no backend.
   a stretch of course; each racer's visibility window there follows from their
   pace profile. An orienteering-with-time-windows solver picks the itinerary
   with the best priorities, strictly in order: everyone seen the way they
-  prefer (during the race or at the finish, per racer), then everyone's
+  prefer (per racer: the finish — the default — or once during the race,
+  then the finish, or during always), then everyone's
   finish, then each preferred sighting, then each other sighting, then repeats
   (with diminishing returns). "Require every finish" makes a missed finish
   outweigh everything else.

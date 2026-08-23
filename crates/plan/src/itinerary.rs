@@ -8,9 +8,9 @@ use geo::{Distance, Euclidean};
 use serde::Serialize;
 use thiserror::Error;
 
-use crate::planner::{Options, Problem, Region, plan};
-use crate::trace::{Trace, leg_traces, network_trace, viewpoint_traces};
-use crate::viewpoints::{Kind, Viewpoint, add_sightings, cluster, raw_viewpoints};
+use crate::planner::{Options, Problem, Region, plan_with};
+use crate::trace::{BestLegs, LabelEvent, Progress, viewpoint_traces};
+use crate::viewpoints::{Kind, Viewpoint, add_sightings, cluster, raw_viewpoints_with};
 
 #[derive(Debug, Error)]
 pub enum SolveError {
@@ -56,13 +56,6 @@ pub struct Itinerary {
     pub unmet_regions: Vec<usize>,
 }
 
-#[derive(Debug, Clone, Serialize)]
-pub struct Solution {
-    pub itinerary: Itinerary,
-    /// Present when `Options::trace` was set.
-    pub trace: Option<Trace>,
-}
-
 /// Snapping tolerance for the spectator's own start and end points.
 const SPECTATOR_SNAP_M: f64 = 200.0;
 
@@ -71,13 +64,26 @@ pub fn solve(
     event: &Event,
     graph: &impl TravelTime,
     options: Options,
-) -> Result<Solution, SolveError> {
+) -> Result<Itinerary, SolveError> {
+    solve_with(event, graph, options, &mut |_| {})
+}
+
+/// `solve`, reporting each stage to `progress` as it happens when `options.trace` is set.
+pub fn solve_with(
+    event: &Event,
+    graph: &impl TravelTime,
+    options: Options,
+    progress: &mut dyn FnMut(Progress),
+) -> Result<Itinerary, SolveError> {
     let projection = Projection::new(event.origin);
     let spectator = &event.spectator;
-    let raw = raw_viewpoints(event, graph, &projection);
-    let raw_locations = options
-        .trace
-        .then(|| raw.iter().map(|v| projection.to_latlon(v.point)).collect::<Vec<_>>());
+    let mut found = |chunk: &[Viewpoint]| {
+        if options.trace {
+            let locations = chunk.iter().map(|v| projection.to_latlon(v.point)).collect();
+            progress(Progress::Candidates { locations });
+        }
+    };
+    let raw = raw_viewpoints_with(event, graph, &projection, &mut found);
     let mut all = cluster(raw, spectator.viewpoint_spacing_m);
     add_sightings(&mut all, event);
     if all.is_empty() {
@@ -108,15 +114,10 @@ pub fn solve(
         None => None,
     };
 
-    // Built from `all` after anchoring so trace indices match the ones the search reports.
-    let mut trace = raw_locations.map(|raw_viewpoints| Trace {
-        network: network_trace(graph, &projection),
-        raw_viewpoints,
-        viewpoints: viewpoint_traces(&all, event, &projection),
-        labels: Vec::new(),
-        labels_total: 0,
-        legs: Vec::new(),
-    });
+    // Reported after anchoring so indices match the ones the search reports.
+    if options.trace {
+        progress(Progress::Viewpoints { viewpoints: viewpoint_traces(&all, event, &projection) });
+    }
 
     let regions = spectator
         .required_regions
@@ -147,7 +148,12 @@ pub fn solve(
         objective: spectator.objective.clone(),
         regions,
     };
-    let result = plan(&problem, options);
+    let mut best_legs = BestLegs::default();
+    let mut sink = |events: Vec<LabelEvent>| {
+        let legs = best_legs.update(&events, &nodes, graph, &projection);
+        progress(Progress::Search { events, legs });
+    };
+    let result = plan_with(&problem, options, &mut sink);
 
     let report = |viewpoint: usize, sighting: usize| {
         let s = &problem.viewpoints[viewpoint].sightings[sighting];
@@ -190,14 +196,7 @@ pub fn solve(
         .filter(|r| !stops.iter().any(|s| s.seen.iter().any(|seen| seen.racer_id == r.id)))
         .map(|r| r.id.clone())
         .collect();
-    if let Some(trace) = &mut trace {
-        trace.legs = leg_traces(&result.events, &nodes, graph, &projection);
-        trace.labels = result.events;
-        trace.labels_total = result.events_total;
-    }
-    let itinerary =
-        Itinerary { stops, legs, score: result.score, unseen, unmet_regions: result.unmet_regions };
-    Ok(Solution { itinerary, trace })
+    Ok(Itinerary { stops, legs, score: result.score, unseen, unmet_regions: result.unmet_regions })
 }
 
 #[cfg(test)]
@@ -282,19 +281,25 @@ mod tests {
 
     #[test]
     fn follows_the_racer_down_the_row_and_catches_the_finish() {
-        let solution =
-            solve(&event(), &grid(), Options { trace: true, ..Options::default() }).unwrap();
-        let trace = solution.trace.unwrap();
-        assert_eq!(trace.network.len(), 25);
-        assert!(!trace.raw_viewpoints.is_empty());
-        assert!(
-            trace.viewpoints.len() <= trace.raw_viewpoints.len() + 1,
-            "clustered plus the start anchor"
-        );
-        assert!(trace.labels.iter().any(|e| matches!(e, LabelEvent::Kept { .. })));
-        assert!(trace.legs.iter().all(|l| l.path.len() >= 2 && l.from != l.to));
-        assert!(!trace.legs.is_empty());
-        let itinerary = solution.itinerary;
+        let mut stages = Vec::new();
+        let options = Options { trace: true, ..Options::default() };
+        let itinerary = solve_with(&event(), &grid(), options, &mut |p| stages.push(p)).unwrap();
+        let (mut candidates, mut viewpoints, mut kept, mut legs) = (0, 0, 0, 0);
+        for stage in &stages {
+            match stage {
+                Progress::Network { .. } => panic!("the network is the caller's to report"),
+                Progress::Candidates { locations } => candidates += locations.len(),
+                Progress::Viewpoints { viewpoints: v } => viewpoints = v.len(),
+                Progress::Search { events, legs: l } => {
+                    kept += events.iter().filter(|e| matches!(e, LabelEvent::Kept { .. })).count();
+                    assert!(l.iter().all(|leg| leg.path.len() >= 2 && leg.from != leg.to));
+                    legs += l.len();
+                }
+            }
+        }
+        assert!(candidates > 0 && viewpoints <= candidates + 1, "clustered plus the start anchor");
+        assert!(kept > 0 && legs > 0);
+        assert!(matches!(stages[0], Progress::Candidates { .. }));
         assert!(itinerary.unseen.is_empty());
         let kinds: Vec<Kind> =
             itinerary.stops.iter().flat_map(|s| s.seen.iter().map(|x| x.kind)).collect();

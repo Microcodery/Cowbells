@@ -13,8 +13,11 @@ use std::collections::BinaryHeap;
 use birdeye_core::{Objective, Prefer, Seconds, Weights};
 use fixedbitset::FixedBitSet;
 
-use crate::trace::{LabelEvent, MAX_LABEL_EVENTS};
+use crate::trace::LabelEvent;
 use crate::viewpoints::{Kind, Viewpoint};
+
+/// Search events are handed to the sink in batches of this many.
+const EVENT_BATCH: usize = 2_000;
 
 #[derive(Debug, Clone)]
 pub struct Problem {
@@ -51,7 +54,7 @@ fn max_priority(problem: &Problem) -> f64 {
 pub struct Options {
     /// Labels kept per viewpoint; more is slower and closer to optimal.
     pub beam: usize,
-    /// Record search events for replay (see `trace::LabelEvent`).
+    /// Report search events to the sink as the search runs (see `trace::LabelEvent`).
     pub trace: bool,
 }
 
@@ -76,18 +79,25 @@ pub struct Plan {
     /// Begins at the start anchor when there is one and ends at the end anchor when there is one.
     pub stops: Vec<Stop>,
     pub score: f64,
-    /// Search events when tracing, capped at `trace::MAX_LABEL_EVENTS`; `events_total` counts all.
-    pub events: Vec<LabelEvent>,
-    pub events_total: usize,
     /// Indices of required regions no stop falls inside.
     pub unmet_regions: Vec<usize>,
 }
 
 /// The best itinerary the beam finds; exact when the beam is wide enough.
 pub fn plan(problem: &Problem, options: Options) -> Plan {
+    plan_with(problem, options, &mut |_| {})
+}
+
+/// `plan`, reporting search events to `sink` in batches as it goes when `options.trace` is set.
+pub fn plan_with(
+    problem: &Problem,
+    options: Options,
+    sink: &mut dyn FnMut(Vec<LabelEvent>),
+) -> Plan {
     let mut search = Search {
         problem,
         options,
+        sink,
         weights: problem.objective.weights(problem.priorities.len(), max_priority(problem)),
         missed_region: problem
             .objective
@@ -97,7 +107,6 @@ pub fn plan(problem: &Problem, options: Options) -> Plan {
         kept: vec![Vec::new(); problem.viewpoints.len()],
         queue: BinaryHeap::new(),
         events: Vec::new(),
-        events_total: 0,
     };
     let roots: Vec<usize> = match problem.start {
         Some(start) => vec![start],
@@ -114,10 +123,8 @@ pub fn plan(problem: &Problem, options: Options) -> Plan {
             search.expand(label);
         }
     }
-    let mut result = search.best_plan();
-    result.events = std::mem::take(&mut search.events);
-    result.events_total = search.events_total;
-    result
+    search.flush();
+    search.best_plan()
 }
 
 #[derive(Debug, Clone)]
@@ -215,8 +222,8 @@ struct Search<'a> {
     /// Surviving label indices per viewpoint, for dominance and the beam.
     kept: Vec<Vec<usize>>,
     queue: BinaryHeap<Queued>,
+    sink: &'a mut dyn FnMut(Vec<LabelEvent>),
     events: Vec<LabelEvent>,
-    events_total: usize,
 }
 
 impl Search<'_> {
@@ -284,9 +291,17 @@ impl Search<'_> {
     }
 
     fn record(&mut self, event: LabelEvent) {
-        self.events_total += 1;
-        if self.options.trace && self.events.len() < MAX_LABEL_EVENTS {
+        if self.options.trace {
             self.events.push(event);
+            if self.events.len() >= EVENT_BATCH {
+                self.flush();
+            }
+        }
+    }
+
+    fn flush(&mut self) {
+        if !self.events.is_empty() {
+            (self.sink)(std::mem::take(&mut self.events));
         }
     }
 
@@ -408,7 +423,17 @@ impl Search<'_> {
             };
         }
         let preferred = self.prefers(racer, sighting.kind);
-        let mut value = priority * if preferred { w.preferred } else { w.other };
+        let en_route_only = self.problem.prefer[racer] == Prefer::EnRoute;
+        let mut value = priority
+            * match (preferred, sighting.kind) {
+                (true, _) => w.preferred,
+                // Worth less than the next pass would be: never preferred to seeing them run again.
+                (false, Kind::Finish) if en_route_only => {
+                    w.repeat
+                        * self.problem.objective.repeat_decay.powi(label.seen[racer] as i32 + 1)
+                }
+                (false, _) => w.other,
+            };
         if counts && preferred && self.preferred_of_field(label) + 1 == self.field.len() {
             value += w.everyone_preferred;
         }
@@ -424,14 +449,14 @@ impl Search<'_> {
     fn prefers(&self, racer: usize, kind: Kind) -> bool {
         match self.problem.prefer[racer] {
             Prefer::Finish => kind == Kind::Finish,
-            Prefer::EnRoute => kind == Kind::Pass,
+            Prefer::Neutral | Prefer::EnRoute => kind == Kind::Pass,
         }
     }
 
     fn had_preferred(&self, label: &Label, racer: usize) -> bool {
         match self.problem.prefer[racer] {
             Prefer::Finish => label.finished.contains(racer),
-            Prefer::EnRoute => label.seen[racer] > 0,
+            Prefer::Neutral | Prefer::EnRoute => label.seen[racer] > 0,
         }
     }
 
@@ -472,8 +497,6 @@ impl Search<'_> {
             return Plan {
                 stops: Vec::new(),
                 score: 0.0,
-                events: Vec::new(),
-                events_total: 0,
                 unmet_regions: (0..self.problem.regions.len()).collect(),
             };
         };
@@ -503,7 +526,7 @@ impl Search<'_> {
         }
         let unmet_regions =
             (0..self.problem.regions.len()).filter(|&i| !chosen.regions_done.contains(i)).collect();
-        Plan { stops, score: chosen.score, events: Vec::new(), events_total: 0, unmet_regions }
+        Plan { stops, score: chosen.score, unmet_regions }
     }
 }
 
@@ -532,8 +555,8 @@ mod tests {
         Viewpoint { node, point: Point::new(node as f64, 0.0), arcs: Vec::new(), sightings }
     }
 
-    /// Two racers of priority 1 at decay 0.5 give a level of 40; both prefer en route, so a
-    /// first en-route sighting is the preferred kind and a finish the other.
+    /// Two racers of priority 1 at decay 0.5 give a level of 40; both are neutral, so a first
+    /// en-route sighting is the preferred kind and a finish the other.
     const FIRST: f64 = 40.0 * 40.0;
     const FINISH: f64 = 40.0;
     const EVERYONE: f64 = 40.0 * 40.0 * 40.0 * 40.0;
@@ -554,7 +577,7 @@ mod tests {
             end: None,
             min_stop: 0.0,
             priorities: vec![1.0, 1.0],
-            prefer: vec![Prefer::EnRoute, Prefer::EnRoute],
+            prefer: vec![Prefer::Neutral, Prefer::Neutral],
             objective: Objective::default(),
             regions: Vec::new(),
         }
@@ -629,11 +652,24 @@ mod tests {
             "plus everyone finished"
         );
 
-        problem.prefer = vec![Prefer::EnRoute, Prefer::EnRoute];
+        problem.prefer = vec![Prefer::Neutral, Prefer::Neutral];
         problem.objective.require_finishes = true;
         let required = plan(&problem, Options::default());
         assert_eq!(required.stops.last().unwrap().viewpoint, 2, "missing a finish costs too much");
         assert_eq!(required.score, 2.0 * FINISH);
+    }
+
+    #[test]
+    fn en_route_only_racers_rate_a_finish_like_a_repeat() {
+        let mut problem = line(vec![
+            viewpoint(0, vec![]),
+            viewpoint(1, vec![sighting(0, 10.0, 12.0), sighting(0, 30.0, 32.0)]),
+            viewpoint(2, vec![finish(0, 25.0, 30.0)]),
+        ]);
+        problem.prefer[0] = Prefer::EnRoute;
+        let plan = plan(&problem, Options::default());
+        assert_eq!(plan.stops.last().unwrap().viewpoint, 1, "stays for the repeat");
+        assert_eq!(plan.score, FIRST + 0.5);
     }
 
     #[test]

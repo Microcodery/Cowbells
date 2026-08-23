@@ -104,12 +104,6 @@ function addLayers(map) {
     },
   });
   map.addLayer({ id: "vertices", type: "circle", source: "vertices", paint: { "circle-radius": 4, "circle-color": "#fff", "circle-stroke-color": ["get", "color"], "circle-stroke-width": 2 } });
-  map.addLayer({
-    id: "course-ends",
-    type: "symbol",
-    source: "course-ends",
-    layout: { "icon-image": ["concat", ICON_PREFIX, ["get", "kind"]], "icon-size": 1, "icon-allow-overlap": true, "icon-ignore-placement": true },
-  });
   map.addLayer({ id: "spectator", type: "circle", source: "spectator", paint: { "circle-radius": 8, "circle-color": ["get", "color"], "circle-stroke-color": "#fff", "circle-stroke-width": 2 } });
   map.addLayer({
     id: "replay-lines",
@@ -128,6 +122,13 @@ function addLayers(map) {
     type: "circle",
     source: "stops",
     paint: { "circle-radius": 11, "circle-color": "#f97316", "circle-stroke-color": "#fff", "circle-stroke-width": 2, "circle-opacity-transition": { duration: 600 } },
+  });
+  // Above the stop circle, which often sits right at the finish, but under its number.
+  map.addLayer({
+    id: "course-ends",
+    type: "symbol",
+    source: "course-ends",
+    layout: { "icon-image": ["concat", ICON_PREFIX, ["get", "kind"]], "icon-size": 1.6, "icon-allow-overlap": true, "icon-ignore-placement": true },
   });
   map.addLayer({
     id: "stop-labels",

@@ -87,9 +87,13 @@ pub struct Racer {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Prefer {
+    /// The finish above all; seeing them en route is a bonus.
     #[default]
-    EnRoute,
     Finish,
+    /// Once en route first, then the finish, then repeats.
+    Neutral,
+    /// En route always: the finish is worth no more than another pass.
+    EnRoute,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -157,7 +161,7 @@ pub struct RequiredRegion {
 
 /// What a plan is worth, in strict priority: everyone seen the way they prefer, then everyone's
 /// finish, then each racer's preferred sighting, then their other kind, then repeats on a
-/// decaying curve.
+/// decaying curve (where a finish for a racer who only cares about en route also sits).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Objective {
     /// Every finish must be seen: a plan missing one is charged more than any level earns.

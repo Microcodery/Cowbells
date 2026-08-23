@@ -99,7 +99,7 @@ export function addRacer(event, course) {
     start_offset_s: 0,
     pace_profile: seedProfile(course),
     priority: 1,
-    prefer: "en_route",
+    prefer: "finish",
   };
   event.racers.push(racer);
   return racer;

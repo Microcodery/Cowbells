@@ -2,7 +2,8 @@
 
 use birdeye_core::geom::{Point, Projection};
 use birdeye_core::{Event, TravelMode};
-use birdeye_plan::Options;
+use birdeye_plan::trace::network_trace;
+use birdeye_plan::{Options, Progress};
 use birdeye_routing::profile::default_speed;
 use birdeye_routing::{Graph, Osm, TravelTime};
 use serde::Deserialize;
@@ -72,18 +73,43 @@ impl Network {
         self.graph.edge_count()
     }
 
-    /// `{ itinerary, trace }` for `event_json`, as JSON; `trace` is null unless options ask for it.
-    pub fn plan(&self, event_json: &str, options_json: &str) -> Result<String, JsError> {
-        let event: Event = serde_json::from_str(event_json)?;
+    /// The itinerary for `event_json`, as JSON. When options ask for a trace, `on_progress`
+    /// receives each `Progress` stage as JSON while the engine works.
+    pub fn plan(
+        &self,
+        event_json: &str,
+        options_json: &str,
+        on_progress: &js_sys::Function,
+    ) -> Result<String, JsError> {
+        let mut report = |progress: Progress| {
+            let json = serde_json::to_string(&progress).unwrap_or_default();
+            let _ = on_progress.call1(&JsValue::NULL, &JsValue::from_str(&json));
+        };
+        self.plan_with(event_json, options_json, &mut report).map_err(|e| JsError::new(&e))
+    }
+}
+
+impl Network {
+    /// `plan` without the JavaScript callback, for native callers and tests.
+    pub fn plan_with(
+        &self,
+        event_json: &str,
+        options_json: &str,
+        progress: &mut dyn FnMut(Progress),
+    ) -> Result<String, String> {
+        let event: Event = serde_json::from_str(event_json).map_err(|e| e.to_string())?;
         if event.spectator.mode != self.mode {
-            return Err(JsError::new("network was built for a different travel mode"));
+            return Err("network was built for a different travel mode".into());
         }
         if let Err(errors) = event.validate() {
             let messages: Vec<String> = errors.iter().map(ToString::to_string).collect();
-            return Err(JsError::new(&messages.join("; ")));
+            return Err(messages.join("; "));
         }
-        let options: PlanOptions = serde_json::from_str(options_json)?;
+        let options: PlanOptions = serde_json::from_str(options_json).map_err(|e| e.to_string())?;
         let projection = Projection::new(event.origin);
+        if options.trace {
+            progress(Progress::Network { points: network_trace(&self.graph, &projection) });
+        }
         let courses: Vec<_> = event.courses.iter().flat_map(|c| c.polylines(&projection)).collect();
         let course_points: Vec<Point> = courses.iter().flat_map(samples_along).collect();
         let mut graph = self.graph.clone();
@@ -96,13 +122,10 @@ impl Network {
         if event.spectator.course_closed {
             graph.close_courses(&courses);
         }
-        let solution = birdeye_plan::solve(
-            &event,
-            &graph,
-            Options { beam: options.beam, trace: options.trace },
-        )
-        .map_err(|e| JsError::new(&e.to_string()))?;
-        Ok(serde_json::to_string(&solution)?)
+        let options = Options { beam: options.beam, trace: options.trace };
+        let itinerary = birdeye_plan::solve_with(&event, &graph, options, progress)
+            .map_err(|e| e.to_string())?;
+        serde_json::to_string(&itinerary).map_err(|e| e.to_string())
     }
 }
 

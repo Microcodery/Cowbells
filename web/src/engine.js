@@ -1,4 +1,4 @@
-// Promise-based calls into the worker.
+// Promise-based calls into the worker; a call may stream progress messages before its result.
 
 export function createEngine() {
   const worker = new Worker(new URL("./worker.js", import.meta.url), { type: "module" });
@@ -7,11 +7,16 @@ export function createEngine() {
   let crashed = null;
 
   worker.onmessage = (e) => {
-    const { id, result, error } = e.data;
-    const { resolve, reject } = pending.get(id) ?? {};
+    const { id, result, error, progress } = e.data;
+    const call = pending.get(id);
+    if (!call) return;
+    if (progress !== undefined) {
+      call.onProgress?.(progress);
+      return;
+    }
     pending.delete(id);
-    if (error) reject?.(new Error(error));
-    else resolve?.(result);
+    if (error) call.reject(new Error(error));
+    else call.resolve(result);
   };
   worker.onerror = (e) => {
     crashed = new Error(`engine crashed: ${e.message}`);
@@ -20,11 +25,11 @@ export function createEngine() {
   };
 
   return {
-    call(type, payload = {}) {
+    call(type, payload = {}, onProgress = null) {
       if (crashed) return Promise.reject(crashed);
       const id = nextId++;
       return new Promise((resolve, reject) => {
-        pending.set(id, { resolve, reject });
+        pending.set(id, { resolve, reject, onProgress });
         worker.postMessage({ id, type, ...payload });
       });
     },

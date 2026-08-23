@@ -1,4 +1,4 @@
-//! What the engine did, stage by stage, for replaying in the UI.
+//! What the engine reports as it works, for drawing its progress.
 
 use std::collections::{HashMap, HashSet};
 
@@ -11,10 +11,8 @@ use crate::viewpoints::Viewpoint;
 
 /// Points along an arc are spaced this far apart when drawn.
 const ARC_STEP_M: f64 = 10.0;
-/// Caps keep the trace a few megabytes at most.
+/// The drawn network is thinned to this many nodes.
 pub const MAX_NETWORK_NODES: usize = 20_000;
-pub const MAX_LABEL_EVENTS: usize = 30_000;
-pub const MAX_LEGS: usize = 600;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ArcTrace {
@@ -57,81 +55,26 @@ pub struct LegTrace {
     pub path: Vec<LatLon>,
 }
 
+/// Stages arrive in this order; `Candidates` and `Search` repeat as chunks arrive. The caller
+/// reports `Network` itself, before any per-plan work, so something shows at once.
 #[derive(Debug, Clone, Serialize)]
-pub struct Trace {
-    pub network: Vec<LatLon>,
+#[serde(tag = "stage", rename_all = "snake_case")]
+pub enum Progress {
+    Network {
+        points: Vec<LatLon>,
+    },
     /// Every spot within sighting distance, before clustering.
-    pub raw_viewpoints: Vec<LatLon>,
-    pub viewpoints: Vec<ViewpointTrace>,
-    pub labels: Vec<LabelEvent>,
-    pub labels_total: usize,
-    /// Road paths for legs the search took: every leg of each best-so-far plan, then other
-    /// expansions in order until the cap.
-    pub legs: Vec<LegTrace>,
-}
-
-pub fn leg_traces(
-    events: &[LabelEvent],
-    nodes: &[NodeId],
-    graph: &impl TravelTime,
-    projection: &Projection,
-) -> Vec<LegTrace> {
-    let mut viewpoint_of = HashMap::new();
-    let mut parent_of = HashMap::new();
-    let mut alive: HashMap<usize, f64> = HashMap::new();
-    let mut best: Option<(usize, f64)> = None;
-    let mut best_pairs = OrderedPairs::default();
-    let mut other_pairs = OrderedPairs::default();
-    for event in events {
-        match event {
-            LabelEvent::Kept { label, parent, viewpoint, score, .. } => {
-                viewpoint_of.insert(*label, *viewpoint);
-                parent_of.insert(*label, *parent);
-                alive.insert(*label, *score);
-                if let Some(parent) = parent {
-                    other_pairs.insert((viewpoint_of[parent], *viewpoint));
-                }
-                if best.is_some_and(|(_, top)| *score <= top) {
-                    continue;
-                }
-                best = Some((*label, *score));
-            }
-            LabelEvent::Trimmed { label } => {
-                alive.remove(label);
-                if best.is_some_and(|(top, _)| top == *label) {
-                    best = alive.iter().map(|(l, s)| (*l, *s)).max_by(|a, b| a.1.total_cmp(&b.1));
-                } else {
-                    continue;
-                }
-            }
-            LabelEvent::Dominated { .. } => continue,
-        }
-        let Some((mut current, _)) = best else { continue };
-        // An ancestor leg already recorded means the rest of the chain is too.
-        while let Some(Some(parent)) = parent_of.get(&current) {
-            if !best_pairs.insert((viewpoint_of[parent], viewpoint_of[&current])) {
-                break;
-            }
-            current = *parent;
-        }
-    }
-    let others = other_pairs.order.into_iter().filter(|p| !best_pairs.seen.contains(p));
-    best_pairs
-        .order
-        .into_iter()
-        .chain(others)
-        .take(MAX_LEGS)
-        .map(|(from, to)| LegTrace {
-            from,
-            to,
-            path: graph
-                .path(nodes[from], nodes[to])
-                .unwrap_or_default()
-                .into_iter()
-                .map(|p| projection.to_latlon(p))
-                .collect(),
-        })
-        .collect()
+    Candidates {
+        locations: Vec<LatLon>,
+    },
+    Viewpoints {
+        viewpoints: Vec<ViewpointTrace>,
+    },
+    /// A batch of search events, plus road paths for any new legs of the best plan so far.
+    Search {
+        events: Vec<LabelEvent>,
+        legs: Vec<LegTrace>,
+    },
 }
 
 /// Every node of the spectator network, thinned to the cap.
@@ -165,21 +108,50 @@ pub fn viewpoint_traces(
         .collect()
 }
 
-/// Insertion-ordered set of viewpoint pairs; self-pairs are ignored.
+/// Follows the search's best label and routes the legs of its chain as they first appear.
 #[derive(Default)]
-struct OrderedPairs {
-    order: Vec<(usize, usize)>,
-    seen: HashSet<(usize, usize)>,
+pub struct BestLegs {
+    viewpoint_of: HashMap<usize, usize>,
+    parent_of: HashMap<usize, Option<usize>>,
+    best: Option<(usize, f64)>,
+    sent: HashSet<(usize, usize)>,
 }
 
-impl OrderedPairs {
-    /// True when the pair is new.
-    fn insert(&mut self, pair: (usize, usize)) -> bool {
-        if pair.0 == pair.1 || !self.seen.insert(pair) {
-            return false;
+impl BestLegs {
+    /// Legs of the best chain after `events` that have not been reported yet.
+    pub fn update(
+        &mut self,
+        events: &[LabelEvent],
+        nodes: &[NodeId],
+        graph: &impl TravelTime,
+        projection: &Projection,
+    ) -> Vec<LegTrace> {
+        for event in events {
+            if let LabelEvent::Kept { label, parent, viewpoint, score, .. } = event {
+                self.viewpoint_of.insert(*label, *viewpoint);
+                self.parent_of.insert(*label, *parent);
+                if self.best.is_none_or(|(_, top)| *score > top) {
+                    self.best = Some((*label, *score));
+                }
+            }
         }
-        self.order.push(pair);
-        true
+        let Some((mut current, _)) = self.best else { return Vec::new() };
+        let mut legs = Vec::new();
+        // An ancestor leg already sent means the rest of the chain was too.
+        while let Some(Some(parent)) = self.parent_of.get(&current) {
+            let pair = (self.viewpoint_of[parent], self.viewpoint_of[&current]);
+            if pair.0 == pair.1 || !self.sent.insert(pair) {
+                break;
+            }
+            let path = graph.path(nodes[pair.0], nodes[pair.1]).unwrap_or_default();
+            legs.push(LegTrace {
+                from: pair.0,
+                to: pair.1,
+                path: path.into_iter().map(|p| projection.to_latlon(p)).collect(),
+            });
+            current = *parent;
+        }
+        legs
     }
 }
 
