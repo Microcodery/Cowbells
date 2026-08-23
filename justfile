@@ -25,10 +25,12 @@ test: lint wasm
 build: (wasm "--release")
     npm --prefix web run build
 
-# Serve the production build from web/dist.
-serve: build
+# Serve whatever `just build` last produced in web/dist.
+serve:
+    test -d web/dist || { echo "no build yet: run 'just build' first"; exit 1; }
     npm --prefix web run preview
 
-# Vite dev server with hot reload.
-dev: wasm
+# Vite dev server with hot reload, using the current wasm package (run `just wasm` after Rust changes).
+dev:
+    test -d crates/wasm/pkg || just wasm
     npm --prefix web run dev

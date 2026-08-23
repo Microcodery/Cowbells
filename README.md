@@ -70,8 +70,8 @@ a headless browser for tests.
     make setup   # one-time: wasm target, wasm-pack, web deps, headless browser
     make test    # lint, wasm build, cargo test, web tests
     make build   # release wasm + vite build into web/dist
-    make serve   # build, then serve web/dist locally
-    make dev     # wasm dev build + vite dev server with hot reload
+    make serve   # serve the last build in web/dist locally
+    make dev     # vite dev server with hot reload (run `make wasm` after Rust changes)
 
 ## Status
 

@@ -22,8 +22,10 @@ build:
 	wasm-pack build crates/wasm --target web --release
 	npm --prefix web run build
 
-serve: build
+serve:
+	test -d web/dist || { echo "no build yet: run 'make build' first"; exit 1; }
 	npm --prefix web run preview
 
-dev: wasm
+dev:
+	test -d crates/wasm/pkg || $(MAKE) wasm
 	npm --prefix web run dev
