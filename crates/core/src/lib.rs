@@ -2,6 +2,7 @@
 
 pub mod geom;
 pub mod gpx;
+pub mod import;
 pub mod model;
 pub mod trajectory;
 pub mod validate;

@@ -1,6 +1,6 @@
 // Owns the WASM engine. Requests carry an id; replies echo it.
 
-import init, { Network, parse_gpx, ping, validate } from "birdeye-wasm";
+import init, { Network, parse_courses, ping, validate } from "birdeye-wasm";
 
 const ready = init();
 let network = null;
@@ -8,7 +8,7 @@ let network = null;
 const handlers = {
   ping: ({ msg }) => ping(msg),
   validate: ({ event }) => JSON.parse(validate(JSON.stringify(event))),
-  gpx: ({ xml }) => JSON.parse(parse_gpx(xml)),
+  courses: ({ name, bytes }) => JSON.parse(parse_courses(name, new Uint8Array(bytes))),
   network: ({ osm, origin, mode, speed }) => {
     network?.free();
     network = null;

@@ -159,6 +159,42 @@ button.plan.missing {
   background: #dc2626;
 }
 
+button.locked {
+  color: var(--muted);
+  background: var(--border);
+  cursor: not-allowed;
+}
+
+.banner {
+  background: #dc2626;
+  color: #fff;
+  padding: 8px 10px;
+  margin: 10px 0 4px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.banner a {
+  color: #fff;
+  font-weight: 600;
+}
+
+.banner button {
+  margin-left: auto;
+  background: transparent;
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.5);
+}
+
+button.tier.plus {
+  background: #7c3aed;
+  color: #fff;
+  border-color: transparent;
+}
+
 h2 {
   font-size: 14px;
   margin: 16px 0 6px;

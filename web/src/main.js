@@ -9,6 +9,7 @@ import * as state from "./state.js";
 
 const STORAGE_KEY = "birdeye.event";
 const UNITS_KEY = "birdeye.units";
+const TIER_KEY = "birdeye.tier";
 const DEFAULT_CENTER = { lat: 45.5231, lon: -122.6765 };
 const AUTOSAVE_DELAY_MS = 500;
 
@@ -23,6 +24,9 @@ const ui = {
   busy: false,
   beam: 64,
   unit: state.UNITS[localStorage.getItem(UNITS_KEY)] ?? state.UNITS.km,
+  // A stand-in for a real account: what the tier allows is enforced, who pays is not.
+  tier: localStorage.getItem(TIER_KEY) in state.TIERS ? localStorage.getItem(TIER_KEY) : "free",
+  banner: null,
   // `null` while alternatives are still being explored; then the ones that beat the plan.
   alternatives: null,
 };
@@ -140,12 +144,41 @@ async function run(label, work) {
   }
 }
 
+/** Applies `edit` only if the event still fits the tier afterwards; otherwise says why not. */
+function mutateWithinTier(edit) {
+  const trial = structuredClone(event);
+  const probe = { event: trial };
+  edit(probe.event);
+  const why = state.overTierLimit(trial, ui.tier);
+  if (why) {
+    ui.status = `${why} — switch to Plus for more.`;
+    draw();
+    return false;
+  }
+  mutate(() => edit(event));
+  return true;
+}
+
 const actions = {
+  toggleTier() {
+    ui.tier = ui.tier === "free" ? "plus" : "free";
+    localStorage.setItem(TIER_KEY, ui.tier);
+    if (ui.tier === "plus") ui.banner = null;
+    draw();
+  },
+  locked({ what }) {
+    const limit = { course: "one course", racer: "two racers", pace: "one pace per racer" }[what];
+    ui.banner = `Free includes ${limit}. Upgrade to Plus for more, or`;
+    draw();
+  },
+  dismissBanner() {
+    ui.banner = null;
+    draw();
+  },
   addCourse() {
-    mutate(() => {
-      state.addCourse(event);
-      ui.tool = { kind: "draw", courseIndex: event.courses.length - 1 };
-    });
+    if (!mutateWithinTier((e) => state.addCourse(e))) return;
+    ui.tool = { kind: "draw", courseIndex: event.courses.length - 1 };
+    draw();
   },
   removeCourse({ ci }) {
     mutate(() => {
@@ -166,14 +199,14 @@ const actions = {
     mutate(() => state.mergeWithNext(event.courses[ci], Number(si)));
   },
   addRacer() {
-    mutate(() => state.addRacer(event, event.courses[0]));
+    mutateWithinTier((e) => state.addRacer(e, e.courses[0]));
   },
   removeRacer({ ri }) {
     mutate(() => event.racers.splice(Number(ri), 1));
   },
   splitInterval({ ri, ii }) {
     const interval = event.racers[ri].pace_profile[ii];
-    mutate(() => state.splitInterval(event.racers[ri], Number(ii), (interval.start_m + interval.end_m) / 2));
+    mutateWithinTier((e) => state.splitInterval(e.racers[ri], Number(ii), (interval.start_m + interval.end_m) / 2));
   },
   mergeInterval({ ri, ii }) {
     mutate(() => state.mergeInterval(event.racers[ri], Number(ii)));
@@ -247,11 +280,14 @@ const actions = {
       ui.status = await buildNetwork();
     });
   },
-  async gpx(_, input) {
-    const xml = await input.files[0]?.text();
-    if (!xml) return;
-    await run("Parsing GPX…", async () => {
-      const courses = await engine.call("gpx", { xml });
+  async importCourses(_, input) {
+    const file = input.files[0];
+    if (!file) return;
+    const bytes = await file.arrayBuffer();
+    await run(`Reading ${file.name}…`, async () => {
+      const courses = await engine.call("courses", { name: file.name, bytes });
+      const room = state.TIERS[ui.tier].courses - event.courses.length;
+      if (courses.length > room) throw new Error(`${file.name} has ${courses.length} courses; ${state.TIERS[ui.tier].label} allows ${state.TIERS[ui.tier].courses}`);
       for (const course of courses) {
         course.start_time = event.spectator.earliest;
         event.courses.push(course);
@@ -281,6 +317,8 @@ const actions = {
     await run("Planning…", async () => {
       if (!event.courses.length) throw new Error("draw or import a course first");
       if (!event.racers.length) throw new Error("add a racer first");
+      const over = state.overTierLimit(event, ui.tier);
+      if (over) throw new Error(`${over} — switch to Plus to plan this event`);
       if (!ui.osm) {
         narrate("Fetching OpenStreetMap data…");
         event.origin = state.courseCenter(event, mapCenter(map));

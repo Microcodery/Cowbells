@@ -15,6 +15,7 @@ export function renderPanel(root, event, ui, actions) {
   const scroll = root.scrollTop;
   const focused = root.contains(document.activeElement) ? selectorFor(document.activeElement) : null;
   root.innerHTML = `
+    ${ui.banner ? `<div class="banner">${ui.banner} <a href="${RELEASES}" target="_blank" rel="noopener">Run it yourself</a> <button data-act="dismissBanner" title="Dismiss">✕</button></div>` : ""}
     <section>
       <div class="row">
         <select data-act="example" ${ui.busy ? "disabled" : ""}>
@@ -22,10 +23,12 @@ export function renderPanel(root, event, ui, actions) {
           <option value="downtown-loop">Downtown loop</option>
           <option value="three-distances">5K · 10K · half marathon</option>
           <option value="hawthorne-belmont">Out-and-back, six racers</option>
+          <option value="colfax-half-marathon">Colfax Half Marathon</option>
+          <option value="colfax-marathon">Colfax Marathon</option>
         </select>
         <button data-act="save" title="Save event as .bird">Save</button>
         <label class="button" title="Load a .bird event">Load<input type="file" accept=".bird,.json" data-act="load" hidden ${ui.busy ? "disabled" : ""}></label>
-        <label class="button" title="Import courses from GPX">GPX<input type="file" accept=".gpx" data-act="gpx" hidden ${ui.busy ? "disabled" : ""}></label>
+        <label class="button" title="Import courses from GPX, KML, KMZ, TCX, FIT, or GeoJSON">Import<input type="file" accept=".gpx,.kml,.kmz,.tcx,.fit,.geojson,.json" data-act="importCourses" hidden ${ui.busy ? "disabled" : ""}></label>
         <button data-act="units" title="Switch units">${ui.unit.label}</button>
       </div>
       <label>Event <input data-field="name" value="${esc(event.name)}"></label>
@@ -55,6 +58,7 @@ export function renderHeader(root, event, ui, actions) {
     <h1>birdseye</h1>
     <button data-act="plan" class="plan ${ready ? "ready" : "missing"}" ${ui.busy ? "disabled" : ""} title="${why}">Plan</button>
     <span class="row">
+      <button data-act="toggleTier" class="tier ${ui.tier}" title="Free: one course, two racers, one pace each. Plus: no limits.">${state.TIERS[ui.tier].label}</button>
       <button data-act="theme" title="Light or dark">◐</button>
       <button data-act="togglePanel" class="phone-only" title="Options">☰</button>
     </span>`;
@@ -80,7 +84,7 @@ function bindActions(root, actions) {
 function coursesSection(event, ui) {
   const tool = (kind, index) => ui.tool?.kind === kind && ui.tool.courseIndex === index;
   return `<details class="section" data-section="courses">
-    <summary><h2>Courses <button data-act="addCourse">+</button></h2></summary>
+    <summary><h2>Courses ${addButton("addCourse", state.tierLocks(event, ui.tier).course, "course")}</h2></summary>
     ${event.courses
       .map(
         (course, ci) => `<div class="card">
@@ -118,7 +122,7 @@ function coursesSection(event, ui) {
 function racersSection(event, ui) {
   if (event.courses.length === 0) return "";
   return `<details class="section" data-section="racers">
-    <summary><h2>Racers <button data-act="addRacer">+</button></h2></summary>
+    <summary><h2>Racers ${addButton("addRacer", state.tierLocks(event, ui.tier).racer, "racer")}</h2></summary>
     ${event.racers
       .map(
         (racer, ri) => `<details class="card" data-section="racer-${racer.id}" open>
@@ -142,7 +146,7 @@ function racersSection(event, ui) {
           <span class="muted">${(p.start_m * ui.unit.perMetre).toFixed(1)}–${state.distanceLabel(p.end_m, ui.unit, 1)}</span>
           <input data-field="pace" data-ri="${ri}" data-ii="${ii}" value="${state.paceLabel(p.seconds_per_km, ui.unit)}" size="5" title="min:sec per ${ui.unit.label}">
           ± <input type="number" data-field="uncertainty" data-ri="${ri}" data-ii="${ii}" value="${Math.round(p.uncertainty * 100)}" min="0" max="99" size="2">%
-          <button data-act="splitInterval" data-ri="${ri}" data-ii="${ii}" title="Split this interval in half">⋯</button>
+          ${state.tierLocks(event, ui.tier).pace(racer) ? addButton("splitInterval", true, "pace") : `<button data-act="splitInterval" data-ri="${ri}" data-ii="${ii}" title="Split this interval in half">⋯</button>`}
           ${ii + 1 < racer.pace_profile.length ? `<button data-act="mergeInterval" data-ri="${ri}" data-ii="${ii}" title="Merge with next">merge ↓</button>` : ""}
         </div>`,
           )
@@ -242,6 +246,16 @@ function selectorFor(element) {
   if (!keys.length) return null;
   return keys.map((k) => `[data-${k.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`)}="${element.dataset[k]}"]`).join("");
 }
+
+const RELEASES = "https://github.com/Microcodery/cowbells/releases";
+
+const LOCK = `<svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.5" d="M4.5 7V5a3.5 3.5 0 0 1 7 0v2"/><rect x="3" y="7" width="10" height="7" rx="1.5" fill="currentColor"/></svg>`;
+
+/** An "add" button, or its locked stand-in when the tier has no room for another `what`. */
+const addButton = (act, locked, what) =>
+  locked
+    ? `<button data-act="locked" data-what="${what}" class="locked" title="Plus allows more">${LOCK}</button>`
+    : `<button data-act="${act}">+</button>`;
 
 const toolButton = (act, active, idle, working, extra = "") =>
   `<button data-act="${act}" ${extra} class="${active ? "active" : ""}">${active ? working : idle}</button>`;

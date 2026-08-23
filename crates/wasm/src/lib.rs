@@ -31,11 +31,12 @@ pub fn validate(event_json: &str) -> Result<String, JsError> {
     Ok(serde_json::to_string(&messages)?)
 }
 
-/// Courses parsed from a GPX document, as JSON.
+/// Courses parsed from a course file (GPX, KML, KMZ, TCX, FIT, GeoJSON), chosen by the
+/// file name's extension, as JSON.
 #[wasm_bindgen]
-pub fn parse_gpx(xml: &str) -> Result<String, JsError> {
-    let courses =
-        birdeye_core::gpx::courses_from_gpx(xml).map_err(|e| JsError::new(&e.to_string()))?;
+pub fn parse_courses(file_name: &str, bytes: &[u8]) -> Result<String, JsError> {
+    let courses = birdeye_core::import::courses_from_file(file_name, bytes)
+        .map_err(|e| JsError::new(&e.to_string()))?;
     Ok(serde_json::to_string(&courses)?)
 }
 

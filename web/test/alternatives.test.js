@@ -27,6 +27,25 @@ describe("betterPlan", () => {
   });
 });
 
+describe("overTierLimit", () => {
+  it("caps courses, racers, and paces on Free but nothing on Plus", async () => {
+    const { addCourse, addRacer, overTierLimit, splitInterval } = await import("../src/state.js");
+    const event = newEvent({ lat: 0, lon: 0 });
+    expect(overTierLimit(event, "free")).toBeNull();
+    addCourse(event);
+    addRacer(event, event.courses[0]);
+    addRacer(event, event.courses[0]);
+    expect(overTierLimit(event, "free")).toBeNull();
+    addRacer(event, event.courses[0]);
+    expect(overTierLimit(event, "free")).toMatch(/2 racers/);
+    event.racers.pop();
+    event.racers[0].pace_profile = [{ start_m: 0, end_m: 1000, seconds_per_km: 300, uncertainty: 0 }];
+    splitInterval(event.racers[0], 0, 500);
+    expect(overTierLimit(event, "free")).toMatch(/one pace/);
+    expect(overTierLimit(event, "plus")).toBeNull();
+  });
+});
+
 describe("alternativeEvent", () => {
   it("loosens a copy and leaves the original alone", () => {
     const event = newEvent({ lat: 0, lon: 0 });

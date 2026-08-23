@@ -6,6 +6,31 @@ const DEFAULT_REGION_RADIUS_M = 100;
 /** Typical speeds per travel mode, matching the routing profiles; shown when the spectator sets none. */
 export const DEFAULT_SPEED_MPS = { walk: 1.3, bike: 4.5, drive: 13.9 };
 
+/** What each tier allows; Free is enough for one friend in one race. */
+export const TIERS = {
+  free: { label: "Free", courses: 1, racers: 2, paces: 1 },
+  plus: { label: "Plus", courses: Infinity, racers: Infinity, paces: Infinity },
+};
+
+/** Which "add" buttons the tier has used up: another course, another racer, another pace for `racer`. */
+export function tierLocks(event, tier) {
+  const limits = TIERS[tier];
+  return {
+    course: event.courses.length >= limits.courses,
+    racer: event.racers.length >= limits.racers,
+    pace: (racer) => racer.pace_profile.length >= limits.paces,
+  };
+}
+
+/** Why the event exceeds `tier`, or null when it fits. */
+export function overTierLimit(event, tier) {
+  const limits = TIERS[tier];
+  if (event.courses.length > limits.courses) return `Free allows ${limits.courses} course`;
+  if (event.racers.length > limits.racers) return `Free allows ${limits.racers} racers`;
+  if (event.racers.some((r) => r.pace_profile.length > limits.paces)) return "Free allows one pace per racer";
+  return null;
+}
+
 /** Display units; the event itself is always metric. */
 export const UNITS = {
   km: { label: "km", perMetre: 0.001, speed: "km/h", speedPerMps: 3.6 },
