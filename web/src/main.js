@@ -8,6 +8,7 @@ import { renderPanel } from "./panel.js";
 import * as state from "./state.js";
 
 const STORAGE_KEY = "birdeye.event";
+const UNITS_KEY = "birdeye.units";
 const DEFAULT_CENTER = { lat: 45.5231, lon: -122.6765 };
 const AUTOSAVE_DELAY_MS = 500;
 
@@ -23,6 +24,7 @@ const ui = {
   beam: 64,
   replaySeconds: 6,
   replaying: null,
+  unit: state.UNITS[localStorage.getItem(UNITS_KEY)] ?? state.UNITS.km,
 };
 
 let event = loadSaved() ?? state.newEvent(DEFAULT_CENTER);
@@ -160,6 +162,12 @@ const actions = {
     document.documentElement.dataset.theme = next;
     setTheme(map, next);
   },
+  units() {
+    const next = ui.unit === state.UNITS.km ? "mi" : "km";
+    ui.unit = state.UNITS[next];
+    localStorage.setItem(UNITS_KEY, next);
+    draw();
+  },
   flyTo({ stop }) {
     flyTo(map, ui.itinerary.stops[stop].location);
   },
@@ -255,7 +263,7 @@ const actions = {
       racerCourse: () => state.assignCourse(racer, event.courses.find((c) => c.id === input.value)),
       racerOffset: () => (racer.start_offset_s = number * 60),
       racerPriority: () => (racer.priority = number),
-      pace: () => (racer.pace_profile[ii].seconds_per_km = state.parsePace(input.value) ?? racer.pace_profile[ii].seconds_per_km),
+      pace: () => (racer.pace_profile[ii].seconds_per_km = state.parsePace(input.value, ui.unit) ?? racer.pace_profile[ii].seconds_per_km),
       uncertainty: () => (racer.pace_profile[ii].uncertainty = number / 100),
       earliest: () => (s.earliest = state.withClock(s.earliest, input.value)),
       latest: () => (s.latest = input.value ? state.laterThan(s.earliest, input.value) : null),
@@ -267,10 +275,11 @@ const actions = {
         ui.network = null;
       },
       speed: () => {
-        s.speed_mps = input.value ? number / state.KMH_PER_MPS : null;
+        s.speed_mps = input.value ? number / ui.unit.speedPerMps : null;
         ui.network = null;
       },
       radius: () => (s.sighting_radius_m = number),
+      skipStart: () => (s.skip_start_m = number / ui.unit.perMetre),
       buffer: () => (s.safety_buffer_s = number * 60),
       minStop: () => (s.min_stop_s = number * 60),
       spacing: () => (s.viewpoint_spacing_m = number),

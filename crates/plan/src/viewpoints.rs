@@ -1,7 +1,7 @@
 //! Viewpoints: spectator-network positions within sight of a stretch of course,
 //! and when each racer passes through that stretch.
 
-use birdeye_core::geom::{Point, Projection, coords};
+use birdeye_core::geom::{Point, Polyline, Projection, coords};
 use birdeye_core::{Event, Seconds, Trajectory, Window};
 use birdeye_routing::{NodeId, TravelTime};
 use geo::{Distance, Euclidean};
@@ -11,6 +11,8 @@ use serde::Serialize;
 
 /// Course points are sampled this often along viewable segments.
 const SAMPLE_SPACING_M: f64 = 20.0;
+/// Network nodes closer than this to a course are in the roadway, not beside it.
+pub const ROADWAY_M: f64 = 6.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -68,17 +70,25 @@ pub fn viewpoints(
     kept
 }
 
-/// Every network node within sighting radius of a course, with its coverage arcs; not yet clustered.
+/// Every network node within sighting radius of a course but not in its roadway, with its
+/// coverage arcs; not yet clustered.
 pub fn raw_viewpoints(
     event: &Event,
     graph: &impl TravelTime,
     projection: &Projection,
 ) -> Vec<Viewpoint> {
     let (samples, index) = sample_courses(event, projection);
+    let courses: Vec<Vec<Polyline>> =
+        event.courses.iter().map(|c| c.polylines(projection)).collect();
+    let in_roadway =
+        |point: Point| courses.iter().flatten().any(|line| line.nearest(point).offset < ROADWAY_M);
     let radius = event.spectator.sighting_radius_m;
     (0..graph.node_count())
         .filter_map(|node| {
             let point = graph.point(node);
+            if in_roadway(point) {
+                return None;
+            }
             let seen: Vec<(&CourseSample, f64)> = index
                 .locate_within_distance(coords(point), radius * radius)
                 .map(|s| {
@@ -144,6 +154,9 @@ fn sample_courses(event: &Event, projection: &Projection) -> (Vec<CourseSample>,
                 for step in 0..=steps {
                     let along = (step as f64 * SAMPLE_SPACING_M).min(length);
                     let distance = offset + along;
+                    if distance < event.spectator.skip_start_m {
+                        continue;
+                    }
                     indexed.push(Indexed::new(coords(polyline.point_at(along)), samples.len()));
                     samples.push(CourseSample {
                         course: course_index,

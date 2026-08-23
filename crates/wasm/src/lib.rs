@@ -2,7 +2,7 @@
 
 use birdeye_core::geom::{Point, Projection};
 use birdeye_core::{Event, TravelMode};
-use birdeye_plan::Options;
+use birdeye_plan::{Options, ROADWAY_M};
 use birdeye_routing::profile::default_speed;
 use birdeye_routing::{Graph, Osm, TravelTime};
 use serde::Deserialize;
@@ -85,6 +85,7 @@ impl Network {
         let course_points: Vec<Point> = courses.iter().flat_map(samples_along).collect();
         let mut graph = self.graph.clone();
         graph.densify_near(&course_points, event.spectator.sighting_radius_m, DENSIFY_SPACING_M);
+        graph.clear_roadways(&courses, ROADWAY_M);
         if event.spectator.course_closed {
             graph.close_courses(&courses);
         }

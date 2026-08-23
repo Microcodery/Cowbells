@@ -145,11 +145,12 @@ trait TravelTime {
 
 1. **Sample the course** every 20 m along viewable segments, recording distance-along-course.
 2. **Densify the spectator network** near the course (`Graph::densify_near`): edges within the sighting radius are split into ≤20 m pieces so viewpoints can sit mid-block, not only at intersections.
-3. **Spatial join**: for every graph node, the course samples within `sighting_radius` (r-tree). Nodes with none are discarded.
-4. **Coverage arcs**: per course, contiguous runs of matched samples become `Arc { start_m, end_m, mean_view_m, finish }`. Multi-lap courses yield several arcs per node.
-5. **Cluster**: viewpoints are ranked by arc width then view distance; one within `viewpoint_spacing_m` (default 120 m, about a minute's walk) of a kept viewpoint that sees no course the kept one misses is dropped — its windows differ by less than the safety buffer, so it cannot change the plan. Spots where another course comes into view survive. Search cost scales with viewpoints², so this spacing is the main performance dial.
-6. **Windows**: for each racer on the arc's course, `Trajectory::window(arc.start, arc.end, safety_buffer)` gives `[entry_earliest − buffer, exit_latest]`; `expected` is the mid-arc expected time.
-7. The spectator's start and end anchors become viewpoints with no sightings (reusing an existing viewpoint at the same node).
+3. **Clear the roadway** (`Graph::clear_roadways`): OSM road centrelines carry both the race route and the walkable way, so edges whose ends both lie within 6 m of a course are removed. The spectator walks sidewalks (where OSM maps them), parallel streets, and park paths, and crosses the course only on cross streets (never, if `course_closed`).
+4. **Spatial join**: for every graph node, the course samples within `sighting_radius` (r-tree). Nodes with none are discarded, as are nodes within 6 m of a course — a spectator stands beside the road, not in it.
+5. **Coverage arcs**: per course, contiguous runs of matched samples become `Arc { start_m, end_m, mean_view_m, finish }`. Multi-lap courses yield several arcs per node.
+6. **Cluster**: viewpoints are ranked by arc width then view distance; one within `viewpoint_spacing_m` (default 120 m, about a minute's walk) of a kept viewpoint that sees no course the kept one misses is dropped — its windows differ by less than the safety buffer, so it cannot change the plan. Spots where another course comes into view survive. Search cost scales with viewpoints², so this spacing is the main performance dial.
+7. **Windows**: for each racer on the arc's course, `Trajectory::window(arc.start, arc.end, safety_buffer)` gives `[entry_earliest − buffer, exit_latest]`; `expected` is the mid-arc expected time.
+8. The spectator's start and end anchors become viewpoints with no sightings (reusing an existing viewpoint at the same node).
 
 Output: `Vec<Viewpoint { node, point, arcs, sightings: Vec<Sighting { racer, window, expected, kind: Pass|Finish }> }>`.
 

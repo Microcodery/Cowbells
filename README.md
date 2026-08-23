@@ -17,13 +17,17 @@ Runs entirely in the browser as a static page: no account, no backend.
   profile over distance (with ±uncertainty per interval), and a priority.
 - **Spectator:** optional start point, day window, optional end point and
   deadline, must-visit areas, walk/bike/drive at your own pace; tunable
-  sighting radius, safety buffer, minimum stop, viewpoint spacing, and a
-  breadth-vs-depth dial.
+  sighting radius, safety buffer, minimum stop, viewpoint spacing, how much
+  of each course's crowded start to skip (a mile by default), and a
+  breadth-vs-depth dial. Distances and paces display in km or miles.
 - **Map:** courses drawn with start/finish markers and direction arrows;
   stretches shared by several courses striped in their colours. After each
   plan the viewpoints, their clustering, and the search replay on the map.
 - **Routing:** OpenStreetMap roads and paths fetched on demand; never crosses
   water or buildings; straight lines allowed through parks and open areas.
+  Roads the race runs on are off limits to the spectator, who keeps to
+  sidewalks, side streets, and paths and crosses the course only on cross
+  streets.
 - **Planning:** viewpoints are spots on the spectator network within sight of
   a stretch of course; each racer's visibility window there follows from their
   pace profile. An orienteering-with-time-windows solver picks the itinerary

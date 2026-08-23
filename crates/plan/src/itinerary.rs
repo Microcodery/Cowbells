@@ -230,7 +230,7 @@ mod tests {
         Projection::new(ORIGIN).to_latlon(Point::new(x, y))
     }
 
-    /// One racer running west→east along the bottom row at 200 s per 100 m, spectator starting a block north.
+    /// One racer running west→east 10 m off the bottom row at 200 s per 100 m, spectator starting a block north.
     fn event() -> Event {
         Event {
             name: "grid".into(),
@@ -242,7 +242,7 @@ mod tests {
                 segments: vec![Segment {
                     id: "s".into(),
                     mode: Mode::Run,
-                    points: vec![latlon(0.0, 0.0), latlon(400.0, 0.0)],
+                    points: vec![latlon(0.0, 10.0), latlon(400.0, 10.0)],
                     viewable: true,
                 }],
             }],
@@ -267,6 +267,7 @@ mod tests {
                 mode: TravelMode::Walk,
                 speed_mps: None,
                 sighting_radius_m: 30.0,
+                skip_start_m: 0.0,
                 safety_buffer_s: 10.0,
                 min_stop_s: 0.0,
                 viewpoint_spacing_m: 50.0,
@@ -326,7 +327,7 @@ mod tests {
     fn out_and_back_course_gives_two_passes_per_corner() {
         let mut event = event();
         event.courses[0].segments[0].points =
-            vec![latlon(0.0, 0.0), latlon(400.0, 0.0), latlon(0.0, 0.0)];
+            vec![latlon(0.0, 10.0), latlon(400.0, 10.0), latlon(0.0, 10.0)];
         event.racers[0].pace_profile[0].end_m = 800.0;
         event.racers[0].pace_profile[0].uncertainty = 0.3;
         let projection = Projection::new(ORIGIN);
@@ -350,11 +351,28 @@ mod tests {
         let mut event = event();
         event.spectator.viewpoint_spacing_m = 120.0;
         event.courses[0].segments[0].points =
-            vec![latlon(0.0, 0.0), latlon(400.0, 0.0), latlon(400.0, 100.0), latlon(0.0, 100.0)];
+            vec![latlon(0.0, 10.0), latlon(400.0, 10.0), latlon(400.0, 90.0), latlon(0.0, 90.0)];
         event.racers[0].pace_profile[0].end_m = 900.0;
         let all = viewpoints(&event, &grid(), &Projection::new(ORIGIN));
         let sees = |from: f64| all.iter().any(|v| v.arcs.iter().any(|a| a.start_m >= from));
         assert!(sees(500.0) && all.iter().any(|v| v.arcs.iter().any(|a| a.end_m <= 400.0)));
+    }
+
+    #[test]
+    fn nodes_in_the_roadway_are_not_viewpoints() {
+        let mut event = event();
+        event.courses[0].segments[0].points = vec![latlon(0.0, 0.0), latlon(400.0, 0.0)];
+        let all = viewpoints(&event, &grid(), &Projection::new(ORIGIN));
+        assert!(all.is_empty(), "the course runs along the only row in sight");
+    }
+
+    #[test]
+    fn skipping_the_start_hides_its_stretch() {
+        let mut event = event();
+        event.spectator.skip_start_m = 150.0;
+        let all = viewpoints(&event, &grid(), &Projection::new(ORIGIN));
+        assert!(all.iter().all(|v| v.arcs.iter().all(|a| a.start_m >= 150.0)), "{all:?}");
+        assert!(!all.is_empty());
     }
 
     #[test]

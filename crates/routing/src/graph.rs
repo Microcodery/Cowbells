@@ -199,6 +199,30 @@ impl Graph {
         }
     }
 
+    /// Drop edges running along a course: the roadway belongs to the racers, so the spectator
+    /// keeps to sidewalks and other streets. Edges that merely touch or cross the course survive.
+    pub fn clear_roadways(&mut self, courses: &[Polyline], width: f64) {
+        // Sampling the course finer than `width` guarantees every node within `width` of
+        // it is within `2 * width` of a sample, so only those need the exact test.
+        let mut in_roadway = vec![false; self.points.len()];
+        for course in courses {
+            let mut along = 0.0;
+            while along <= course.length() {
+                let sample = coords(course.point_at(along));
+                for node in self.index.locate_within_distance(sample, 4.0 * width * width) {
+                    in_roadway[node.data] = true;
+                }
+                along += width;
+            }
+        }
+        for (flag, point) in in_roadway.iter_mut().zip(&self.points) {
+            *flag = *flag && courses.iter().any(|c| c.nearest(*point).offset < width);
+        }
+        for from in (0..self.points.len()).filter(|&n| in_roadway[n]) {
+            self.edges[from].retain(|e| !in_roadway[e.to]);
+        }
+    }
+
     fn nodes_inside(&self, polygon: &Polygon) -> Vec<NodeId> {
         let Some(rect) = polygon.bounding_rect() else { return Vec::new() };
         let bounds = AABB::from_corners([rect.min().x, rect.min().y], [rect.max().x, rect.max().y]);
@@ -409,6 +433,16 @@ mod tests {
         g.close_courses(&[course]);
         assert_eq!(g.time(0, 2), None);
         assert_eq!(g.time(0, 6), Some(2.0));
+    }
+
+    #[test]
+    fn clearing_roadways_keeps_cross_streets() {
+        let mut g = lattice();
+        let course = Polyline::new(vec![Point::new(-1.0, 0.0), Point::new(3.0, 0.0)]);
+        g.clear_roadways(&[course], 0.1);
+        assert!(!g.has_edge(0, 1), "along the course");
+        assert_eq!(g.time(0, 3), Some(1.0), "away from the course");
+        assert_eq!(g.time(0, 1), Some(3.0), "around the block instead");
     }
 
     #[test]

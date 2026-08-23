@@ -11,7 +11,7 @@ const TRAVEL = ["walk", "bike", "drive"];
  */
 export function renderPanel(root, event, ui, actions) {
   // Rebuilding the markup must not move the user: keep open sections open and the scroll where it was.
-  const open = new Set([...root.querySelectorAll("details[open] > summary")].map((s) => s.textContent));
+  const folds = new Map([...root.querySelectorAll("details[data-section]")].map((d) => [d.dataset.section, d.open]));
   const scroll = root.scrollTop;
   root.innerHTML = `
     <header>
@@ -25,15 +25,17 @@ export function renderPanel(root, event, ui, actions) {
         <button data-act="save" title="Save event as .bird">Save</button>
         <label class="button" title="Load a .bird event">Load<input type="file" accept=".bird,.json" data-act="load" hidden ${ui.busy ? "disabled" : ""}></label>
         <label class="button" title="Import courses from GPX">GPX<input type="file" accept=".gpx" data-act="gpx" hidden ${ui.busy ? "disabled" : ""}></label>
-        <button data-act="theme">◐</button>
+        <button data-act="theme" title="Light or dark">◐</button>
+        <button data-act="units" title="Switch units">${ui.unit.label}</button>
       </div>
     </header>
     <section>
       <label>Event <input data-field="name" value="${esc(event.name)}"></label>
     </section>
     ${coursesSection(event, ui)}
-    ${racersSection(event)}
+    ${racersSection(event, ui)}
     ${spectatorSection(event, ui)}
+    ${settingsSection(event, ui)}
     <section>
       <h2>Plan</h2>
       <div class="row">
@@ -43,8 +45,8 @@ export function renderPanel(root, event, ui, actions) {
       <p class="muted"><span data-status>${esc(ui.status)}</span> ${ui.replaying ? `<button data-act="skipReplay">Skip</button>` : ""}</p>
       ${ui.itinerary ? results(ui.itinerary, event) : ""}
     </section>`;
-  for (const summary of root.querySelectorAll("details > summary")) {
-    summary.parentElement.open = open.has(summary.textContent);
+  for (const details of root.querySelectorAll("details[data-section]")) {
+    if (folds.has(details.dataset.section)) details.open = folds.get(details.dataset.section);
   }
   root.scrollTop = scroll;
 
@@ -52,6 +54,8 @@ export function renderPanel(root, event, ui, actions) {
     const target = e.target.closest("[data-act]");
     // File inputs and selects act on change, not on the click that opens them.
     if (target && !["INPUT", "SELECT"].includes(target.tagName)) actions[target.dataset.act](target.dataset);
+    // A button in a section heading acts without folding the section.
+    if (target?.closest("summary")) e.preventDefault();
   };
   root.onchange = (e) => {
     const { act, field } = e.target.dataset;
@@ -62,15 +66,15 @@ export function renderPanel(root, event, ui, actions) {
 
 function coursesSection(event, ui) {
   const tool = (kind, index) => ui.tool?.kind === kind && ui.tool.courseIndex === index;
-  return `<section>
-    <h2>Courses <button data-act="addCourse">+</button></h2>
+  return `<details class="section" data-section="courses" open>
+    <summary><h2>Courses <button data-act="addCourse">+</button></h2></summary>
     ${event.courses
       .map(
         (course, ci) => `<div class="card">
       <div class="row">
         <input data-field="courseName" data-ci="${ci}" value="${esc(course.name)}">
         <input type="time" data-field="courseStart" data-ci="${ci}" value="${state.clock(course.start_time)}">
-        <span class="muted">${(state.courseLength(course) / 1000).toFixed(2)} km</span>
+        <span class="muted">${state.distanceLabel(state.courseLength(course), ui.unit)}</span>
         <button data-act="removeCourse" data-ci="${ci}" title="Remove course">${TRASH}</button>
       </div>
       <div class="row">
@@ -93,13 +97,13 @@ function coursesSection(event, ui) {
     </div>`,
       )
       .join("")}
-  </section>`;
+  </details>`;
 }
 
-function racersSection(event) {
+function racersSection(event, ui) {
   if (event.courses.length === 0) return "";
-  return `<section>
-    <h2>Racers <button data-act="addRacer">+</button></h2>
+  return `<details class="section" data-section="racers" open>
+    <summary><h2>Racers <button data-act="addRacer">+</button></h2></summary>
     ${event.racers
       .map(
         (racer, ri) => `<div class="card">
@@ -116,8 +120,8 @@ function racersSection(event) {
         ${racer.pace_profile
           .map(
             (p, ii) => `<div class="row">
-          <span class="muted">${(p.start_m / 1000).toFixed(1)}–${(p.end_m / 1000).toFixed(1)} km</span>
-          <input data-field="pace" data-ri="${ri}" data-ii="${ii}" value="${state.paceLabel(p.seconds_per_km)}" size="5" title="min:sec per km">
+          <span class="muted">${(p.start_m * ui.unit.perMetre).toFixed(1)}–${state.distanceLabel(p.end_m, ui.unit, 1)}</span>
+          <input data-field="pace" data-ri="${ri}" data-ii="${ii}" value="${state.paceLabel(p.seconds_per_km, ui.unit)}" size="5" title="min:sec per ${ui.unit.label}">
           ± <input type="number" data-field="uncertainty" data-ri="${ri}" data-ii="${ii}" value="${Math.round(p.uncertainty * 100)}" min="0" max="99" size="2">%
           <button data-act="splitInterval" data-ri="${ri}" data-ii="${ii}" title="Split this interval in half">⋯</button>
           ${ii + 1 < racer.pace_profile.length ? `<button data-act="mergeInterval" data-ri="${ri}" data-ii="${ii}" title="Merge with next">merge ↓</button>` : ""}
@@ -128,21 +132,21 @@ function racersSection(event) {
     </div>`,
       )
       .join("")}
-  </section>`;
+  </details>`;
 }
 
 function spectatorSection(event, ui) {
   const s = event.spectator;
   const tool = (kind) => ui.tool?.kind === kind;
-  return `<section>
-    <h2>Spectator</h2>
+  return `<details class="section" data-section="spectator" open>
+    <summary><h2>Spectator</h2></summary>
     <div class="row">
       ${toolButton("setStart", tool("start"), s.start ? "Move start" : "Set start", "Click the map")}
       ${s.start ? `<button data-act="clearStart" title="Remove start; the planner chooses">${TRASH}</button>` : `<span class="muted">planner chooses</span>`}
       <label>from <input type="time" data-field="earliest" value="${state.clock(s.earliest)}"></label>
       <label>until <input type="time" data-field="latest" value="${s.latest ? state.clock(s.latest) : ""}"></label>
       <select data-field="travel">${options(TRAVEL, s.mode)}</select>
-      ${s.mode === "drive" ? "" : `<label>at <input type="number" data-field="speed" value="${s.speed_mps ? (s.speed_mps * state.KMH_PER_MPS).toFixed(1) : ""}" placeholder="${state.DEFAULT_SPEED_KMH[s.mode]}" min="0.5" step="0.5" size="4" title="your pace on ordinary streets; blank for a typical one"> km/h</label>`}
+      ${s.mode === "drive" ? "" : `<label>at <input type="number" data-field="speed" value="${s.speed_mps ? state.speedLabel(s.speed_mps, ui.unit) : ""}" placeholder="${state.speedLabel(state.DEFAULT_SPEED_MPS[s.mode], ui.unit)}" min="0.5" step="0.5" size="4" title="your pace on ordinary streets; blank for a typical one"> ${ui.unit.speed}</label>`}
     </div>
     <div class="row">
       ${toolButton("setEnd", tool("end"), s.end ? "Move end" : "Set end", "Click the map")}
@@ -160,9 +164,15 @@ function spectatorSection(event, ui) {
     </div>`,
       )
       .join("")}
-    <details>
-      <summary>Settings</summary>
+  </details>`;
+}
+
+function settingsSection(event, ui) {
+  const s = event.spectator;
+  return `<details class="section" data-section="settings">
+      <summary><h2>Settings</h2></summary>
       <label>sighting radius <input type="number" data-field="radius" value="${s.sighting_radius_m}" min="5" size="3"> m</label>
+      <label>skip first <input type="number" data-field="skipStart" value="${((s.skip_start_m ?? 1600) * ui.unit.perMetre).toFixed(1)}" min="0" step="0.1" size="4" title="the crowded start of each course is not worth a stop"> ${ui.unit.label}</label>
       <label>safety buffer <input type="number" data-field="buffer" value="${s.safety_buffer_s / 60}" min="0" step="0.5" size="3"> min</label>
       <label>min stop <input type="number" data-field="minStop" value="${s.min_stop_s / 60}" min="0" size="3"> min</label>
       <label>viewpoint spacing <input type="number" data-field="spacing" value="${s.viewpoint_spacing_m ?? 120}" min="20" step="10" size="4" title="spots closer than this that see the same courses merge"> m</label>
@@ -170,8 +180,7 @@ function spectatorSection(event, ui) {
       <label><input type="checkbox" data-field="courseClosed" ${s.course_closed ? "checked" : ""}> course closed to crossing</label>
       <label>search effort <select data-field="beam">${options(["16", "64", "256"], String(ui.beam))}</select></label>
       <label>replay length <input type="range" data-field="replaySeconds" value="${ui.replaySeconds}" min="1" max="60" step="1" title="seconds to animate the planner's steps after each plan; click the map to skip"> ${ui.replaySeconds}s</label>
-    </details>
-  </section>`;
+  </details>`;
 }
 
 function results(itinerary, event) {

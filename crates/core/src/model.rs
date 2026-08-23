@@ -108,6 +108,9 @@ pub struct SpectatorConfig {
     pub speed_mps: Option<f64>,
     #[serde(default = "default_sighting_radius_m")]
     pub sighting_radius_m: f64,
+    /// The first stretch of every course is not worth watching: a crowded start tells you little.
+    #[serde(default = "default_skip_start_m")]
+    pub skip_start_m: f64,
     /// How long before a racer could possibly appear the spectator must already be in place.
     #[serde(default = "default_safety_buffer_s")]
     pub safety_buffer_s: Seconds,
@@ -198,6 +201,11 @@ fn default_safety_buffer_s() -> f64 {
 fn default_min_stop_s() -> f64 {
     60.0
 }
+/// About a mile: the pack has spread out by then.
+fn default_skip_start_m() -> f64 {
+    1600.0
+}
+
 fn default_viewpoint_spacing_m() -> f64 {
     120.0
 }

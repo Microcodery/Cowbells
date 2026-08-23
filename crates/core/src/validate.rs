@@ -38,6 +38,8 @@ pub enum ValidationError {
     DayWindow,
     #[error("spectator speed must be positive and finite")]
     Speed,
+    #[error("skipped start length must be zero or more")]
+    SkipStart,
 }
 
 impl Event {
@@ -72,6 +74,9 @@ fn check_spectator(spectator: &SpectatorConfig, errors: &mut Vec<ValidationError
     }
     if spectator.speed_mps.is_some_and(|s| !(s > 0.0 && s.is_finite())) {
         errors.push(ValidationError::Speed);
+    }
+    if !(spectator.skip_start_m >= 0.0 && spectator.skip_start_m.is_finite()) {
+        errors.push(ValidationError::SkipStart);
     }
 }
 
@@ -198,6 +203,7 @@ mod tests {
                 mode: TravelMode::Walk,
                 speed_mps: None,
                 sighting_radius_m: 30.0,
+                skip_start_m: 0.0,
                 safety_buffer_s: 120.0,
                 min_stop_s: 60.0,
                 viewpoint_spacing_m: 120.0,
@@ -266,13 +272,15 @@ mod tests {
         e.spectator.objective.repeat_decay = 1.5;
         e.spectator.latest = Some(-1);
         e.spectator.speed_mps = Some(0.0);
+        e.spectator.skip_start_m = -1.0;
         assert_eq!(
             e.validate(),
             Err(vec![
                 ValidationError::Tiers,
                 ValidationError::RepeatDecay,
                 ValidationError::DayWindow,
-                ValidationError::Speed
+                ValidationError::Speed,
+                ValidationError::SkipStart
             ])
         );
     }

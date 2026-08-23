@@ -4,8 +4,21 @@ const DEFAULT_PACE_S_PER_KM = { run: 360, bike: 100, swim: 1200, other: 360 };
 const DEFAULT_UNCERTAINTY = 0.05;
 const DEFAULT_REGION_RADIUS_M = 100;
 /** Typical speeds per travel mode, matching the routing profiles; shown when the spectator sets none. */
-export const DEFAULT_SPEED_KMH = { walk: 4.7, bike: 16 };
-export const KMH_PER_MPS = 3.6;
+export const DEFAULT_SPEED_MPS = { walk: 1.3, bike: 4.5 };
+
+/** Display units; the event itself is always metric. */
+export const UNITS = {
+  km: { label: "km", perMetre: 0.001, speed: "km/h", speedPerMps: 3.6 },
+  mi: { label: "mi", perMetre: 1 / 1609.344, speed: "mph", speedPerMps: 2.236936 },
+};
+
+export function distanceLabel(metres, unit, digits = 2) {
+  return `${(metres * unit.perMetre).toFixed(digits)} ${unit.label}`;
+}
+
+export function speedLabel(mps, unit) {
+  return (mps * unit.speedPerMps).toFixed(1);
+}
 
 export function newEvent(center) {
   return {
@@ -21,6 +34,7 @@ export function newEvent(center) {
       mode: "walk",
       speed_mps: null,
       sighting_radius_m: 30,
+      skip_start_m: 1600,
       safety_buffer_s: 120,
       min_stop_s: 60,
       viewpoint_spacing_m: 120,
@@ -230,18 +244,22 @@ export function laterThan(epoch, hhmm) {
   return t > epoch ? t : t + 24 * 3600;
 }
 
-export function paceLabel(secondsPerKm) {
-  const m = Math.floor(secondsPerKm / 60);
-  const s = Math.round(secondsPerKm % 60);
+const kmPerUnit = (unit) => 1 / (unit.perMetre * 1000);
+
+/** "m:ss" per display unit from seconds per kilometre. */
+export function paceLabel(secondsPerKm, unit = UNITS.km) {
+  const perUnit = secondsPerKm * kmPerUnit(unit);
+  const m = Math.floor(perUnit / 60);
+  const s = Math.round(perUnit % 60);
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
-/** "m:ss" or whole minutes per km, as seconds; `null` when unparseable. */
-export function parsePace(text) {
+/** "m:ss" or whole minutes per display unit, as seconds per kilometre; `null` when unparseable. */
+export function parsePace(text, unit = UNITS.km) {
   const match = text.trim().match(/^(\d+)(?::(\d{1,2}))?$/);
   if (!match) return null;
   const seconds = Number(match[1]) * 60 + Number(match[2] ?? 0);
-  return seconds > 0 ? seconds : null;
+  return seconds > 0 ? seconds / kmPerUnit(unit) : null;
 }
 
 export function looksLikeEvent(value) {

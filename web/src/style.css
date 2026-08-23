@@ -166,7 +166,18 @@ label {
   gap: 4px;
 }
 
-details label {
+details.section > summary {
+  cursor: pointer;
+  list-style-position: inside;
+}
+
+details.section > summary h2 {
+  display: inline-flex;
+  width: calc(100% - 1.5em);
+  margin: 12px 0 6px;
+}
+
+details[data-section="settings"] label {
   display: flex;
   margin: 4px 0;
 }
