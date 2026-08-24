@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use birdseye_wasm::Network;
+use cowbells_wasm::Network;
 use serde_json::Value;
 
 struct Expected {

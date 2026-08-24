@@ -4,8 +4,8 @@ pub mod graph;
 pub mod osm;
 pub mod profile;
 
-use birdseye_core::Seconds;
-use birdseye_core::geom::Point;
+use cowbells_core::Seconds;
+use cowbells_core::geom::Point;
 pub use graph::{Graph, NodeId};
 pub use osm::Osm;
 

@@ -3,7 +3,7 @@
 
 use std::io::{Cursor, Read};
 
-use birdseye_core::{Course, LatLon, Mode, Segment};
+use cowbells_core::{Course, LatLon, Mode, Segment};
 use quick_xml::Reader;
 use quick_xml::events::Event as Xml;
 use thiserror::Error;

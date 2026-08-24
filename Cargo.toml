@@ -8,10 +8,10 @@ edition = "2024"
 license = "BUSL-1.1"
 
 [workspace.dependencies]
-birdseye-core = { path = "crates/core" }
-birdseye-import = { path = "crates/import" }
-birdseye-routing = { path = "crates/routing" }
-birdseye-plan = { path = "crates/plan" }
+cowbells-core = { path = "crates/core" }
+cowbells-import = { path = "crates/import" }
+cowbells-routing = { path = "crates/routing" }
+cowbells-plan = { path = "crates/plan" }
 
 [profile.release]
 opt-level = "s"

@@ -1,13 +1,13 @@
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
 
-const wasmPkg = fileURLToPath(new URL("../crates/wasm/pkg/birdseye_wasm.js", import.meta.url));
+const wasmPkg = fileURLToPath(new URL("../crates/wasm/pkg/cowbells_wasm.js", import.meta.url));
 
 export default defineConfig({
   base: "./",
   // Our worker and MapLibre's are ES modules.
   worker: { format: "es" },
-  resolve: { alias: { "birdseye-wasm": wasmPkg } },
+  resolve: { alias: { "cowbells-wasm": wasmPkg } },
   // MapLibre is most of the bundle and changes rarely; its own chunk caches separately. It is
   // ~950 kB minified on its own, so the size warning is raised just above it.
   build: {

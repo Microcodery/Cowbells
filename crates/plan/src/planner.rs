@@ -10,7 +10,7 @@
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 
-use birdseye_core::{Objective, Prefer, Seconds};
+use cowbells_core::{Objective, Prefer, Seconds};
 use fixedbitset::FixedBitSet;
 
 use crate::trace::LabelEvent;
@@ -577,7 +577,7 @@ impl Search<'_> {
 
 #[cfg(test)]
 mod tests {
-    use birdseye_core::Window;
+    use cowbells_core::Window;
 
     use super::*;
 

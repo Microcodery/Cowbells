@@ -1,6 +1,6 @@
 // Owns the WASM engine. Requests carry an id; replies echo it.
 
-import init, { Network, parse_courses, validate, version } from "birdseye-wasm";
+import init, { Network, parse_courses, validate, version } from "cowbells-wasm";
 
 const ready = init();
 let network = null;

@@ -1,16 +1,16 @@
-//! wasm-bindgen facade over the birdseye engine. Everything crosses as JSON strings.
+//! wasm-bindgen facade over the cowbells engine. Everything crosses as JSON strings.
 
-use birdseye_core::geom::Projection;
-use birdseye_core::{Event, TravelMode};
-use birdseye_plan::{Options, Progress, network_trace, prepare_graph};
-use birdseye_routing::profile::default_speed;
-use birdseye_routing::{Graph, Osm, TravelTime};
+use cowbells_core::geom::Projection;
+use cowbells_core::{Event, TravelMode};
+use cowbells_plan::{Options, Progress, network_trace, prepare_graph};
+use cowbells_routing::profile::default_speed;
+use cowbells_routing::{Graph, Osm, TravelTime};
 use serde::Deserialize;
 use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen]
 pub fn version() -> String {
-    birdseye_core::VERSION.into()
+    cowbells_core::VERSION.into()
 }
 
 /// Validation errors for an event JSON document, as a JSON array of strings (empty when valid).
@@ -28,7 +28,7 @@ pub fn validate(event_json: &str) -> Result<String, JsError> {
 /// file name's extension, as JSON.
 #[wasm_bindgen]
 pub fn parse_courses(file_name: &str, bytes: &[u8]) -> Result<String, JsError> {
-    let courses = birdseye_import::courses_from_file(file_name, bytes)
+    let courses = cowbells_import::courses_from_file(file_name, bytes)
         .map_err(|e| JsError::new(&e.to_string()))?;
     Ok(serde_json::to_string(&courses)?)
 }
@@ -106,7 +106,7 @@ impl Network {
         }
         let graph = prepare_graph(&self.graph, &event, &projection, options.speed_factor);
         let solver_options = Options { beam: options.beam, trace: options.trace };
-        let itinerary = birdseye_plan::solve_with(&event, &graph, solver_options, progress)
+        let itinerary = cowbells_plan::solve_with(&event, &graph, solver_options, progress)
             .map_err(|e| e.to_string())?;
         serde_json::to_string(&itinerary).map_err(|e| e.to_string())
     }
@@ -131,7 +131,7 @@ fn default_beam() -> usize {
 mod tests {
     #[test]
     fn version_matches_the_crate() {
-        assert_eq!(super::version(), birdseye_core::VERSION);
+        assert_eq!(super::version(), cowbells_core::VERSION);
     }
 
     #[test]

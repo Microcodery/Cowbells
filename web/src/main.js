@@ -33,10 +33,10 @@ import { planSummary } from "./plans.js";
 import { liveReplay } from "./replay.js";
 import { TIERS, overTierLimit, tierAllows } from "./tiers.js";
 
-const EVENT_KEY = "birdseye.event";
-const UNITS_KEY = "birdseye.units";
-const TIER_KEY = "birdseye.tier";
-const DEBUG_KEY = "birdseye.debug";
+const EVENT_KEY = "cowbells.event";
+const UNITS_KEY = "cowbells.units";
+const TIER_KEY = "cowbells.tier";
+const DEBUG_KEY = "cowbells.debug";
 const DEFAULT_CENTER = { lat: 45.5231, lon: -122.6765 };
 const AUTOSAVE_DELAY_MS = 500;
 
@@ -83,7 +83,7 @@ const mapdata = createMapData({
 map.on("layers-ready", render);
 map.once("layers-ready", () => mapdata.restore());
 map.on("move", placeHoverTip);
-window.birdseye = { map, event: () => event };
+window.cowbells = { map, event: () => event };
 
 /** A preference chosen on an earlier visit, or `fallback` when it is missing or no longer offered. */
 function storedChoice(key, table, fallback) {

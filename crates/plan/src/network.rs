@@ -1,9 +1,9 @@
 //! Shaping the shared routing graph for one plan: where the spectator may walk, and how finely
 //! the network is cut up near the courses.
 
-use birdseye_core::Event;
-use birdseye_core::geom::{Point, Polyline, Projection};
-use birdseye_routing::Graph;
+use cowbells_core::Event;
+use cowbells_core::geom::{Point, Polyline, Projection};
+use cowbells_routing::Graph;
 
 /// Spectator edges this close to a course are split so viewpoints can sit mid-block.
 const DENSIFY_SPACING_M: f64 = 20.0;

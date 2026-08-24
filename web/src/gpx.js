@@ -20,7 +20,7 @@ export function itineraryToGpx(itinerary, event) {
     .flatMap((leg, i) => (i === 0 ? leg.path : leg.path.slice(1)))
     .map((p) => `      <trkpt lat="${p.lat}" lon="${p.lon}"></trkpt>`);
   return `<?xml version="1.0" encoding="UTF-8"?>
-<gpx version="1.1" creator="birdseye" xmlns="http://www.topografix.com/GPX/1/1">
+<gpx version="1.1" creator="cowbells" xmlns="http://www.topografix.com/GPX/1/1">
   <metadata><name>${esc(event.name)} — spectator</name></metadata>
 ${waypoints.join("\n")}
   <trk>

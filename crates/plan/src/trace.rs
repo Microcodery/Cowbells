@@ -2,9 +2,9 @@
 
 use std::collections::{HashMap, HashSet};
 
-use birdseye_core::geom::{Polyline, Projection};
-use birdseye_core::{Event, LatLon, Seconds};
-use birdseye_routing::{NodeId, Routes, TravelTime};
+use cowbells_core::geom::{Polyline, Projection};
+use cowbells_core::{Event, LatLon, Seconds};
+use cowbells_routing::{NodeId, Routes, TravelTime};
 use serde::Serialize;
 
 use crate::viewpoints::Viewpoint;

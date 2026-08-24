@@ -1,4 +1,4 @@
-# birdseye — Prior Art, Stack Validation, and Risk Research
+# cowbells — Prior Art, Stack Validation, and Risk Research
 
 *Compiled 2026-08-22. Every non-obvious claim carries a URL. Claims that could not be
 verified from a primary source are marked **[unverified]**. Numbers I measured myself on
@@ -14,8 +14,8 @@ this machine are marked **[measured]** and the method is in [Appendix A](#append
    PDF-and-prose page. The one genuine near-miss, [RunDida's Spectator Planner](https://rundida.com/tools/spectator-planner/),
    *validates* a user-chosen set of 1–5 stops against hardcoded travel-speed formulas; it
    never searches the space of possible stop combinations, has no real routing, and only
-   supports six named marathons. birdseye is not duplicating anything.
-2. **The academic framing is solid and the exact application is novel.** birdseye is an
+   supports six named marathons. cowbells is not duplicating anything.
+2. **The academic framing is solid and the exact application is novel.** cowbells is an
    instance of the **Multi-Constraint Team Orienteering Problem with Multiple Time Windows
    (MC-TOP-MTW)** — a node (viewing spot) carries *several* time windows, one per racer
    passing it. That variant has a published, fast, greedy-insertion + ILS/GRASP solver that
@@ -66,7 +66,7 @@ the COOP/COEP question moot); deploy to Cloudflare Pages or Netlify rather than 
 | Garmin LiveTrack + Spectator Messaging | Live location share + messages to the athlete's watch | No |
 
 All of these also require **race-organizer integration** (chip timing feeds or the runner
-carrying a phone). birdseye requires neither — it works from a course and a pace estimate,
+carrying a phone). cowbells requires neither — it works from a course and a pace estimate,
 which is exactly the case these tools cannot serve (small races, unofficial events,
 training runs, races where your runner won't carry a phone).
 
@@ -88,7 +88,7 @@ item worth checking by hand before making any public "first of its kind" claim.
 ~22.7), Shadwell (~13 and ~22), Canada Water, Isle of Dogs — documented in blog posts like
 [jonevanscoaching.com](https://www.jonevanscoaching.com/post/our-london-marathon-spectator-guide-part-2-where-to-stand-to-see-your-runner)
 and [marathonhandbook.com](https://marathonhandbook.com/how-to-watch-the-2026-london-marathon-a-complete-guide/).
-This is precisely the plan birdseye would compute, and today it is produced entirely by hand.
+This is precisely the plan cowbells would compute, and today it is produced entirely by hand.
 
 **The closest thing that exists: [RunDida Spectator Planner](https://rundida.com/tools/spectator-planner/).**
 Fetched and inspected directly. Inputs: pace or finish time, race start, distance, number of
@@ -107,7 +107,7 @@ Critically:
 **Ultra / crew planning.** [UltraPlanRun](https://ultraplan.run/) and
 [ultraPacer](https://ultrapacer.com/) produce excellent *runner* pacing plans (altitude,
 darkness, heat, fatigue-aware) with live-recalculating aid-station ETAs shareable with crew —
-they solve birdseye's *prediction* half well, and none of its *routing/optimization* half.
+they solve cowbells's *prediction* half well, and none of its *routing/optimization* half.
 Crew logistics remains DIY spreadsheets; see e.g. [WSER crew suggestions](https://www.wser.org/crew-suggestions/).
 
 **Note:** [FindMyMarathon.com](https://findmymarathon.com/) has **no spectator feature** — it
@@ -158,15 +158,15 @@ with a dependency footprint hostile to WASM.
 sightseeing itineraries — solves the Team Orienteering Problem with Time Windows (TOPTW) with
 greedy insertion + ILS and O(1) Wait–MaxShift feasibility."* Vanilla JS, zero dependencies,
 runs entirely client-side in a Web Worker. It is not a competitor (tourism, not racing; no
-course or pace model) but it is direct evidence that **the exact algorithmic bet birdseye is
+course or pace model) but it is direct evidence that **the exact algorithmic bet cowbells is
 making runs fine in a browser**.
 
-No purpose-built Rust or WASM orienteering solver was found. birdseye's solver would be
+No purpose-built Rust or WASM orienteering solver was found. cowbells's solver would be
 written from the published algorithms, not ported.
 
 ### 1.3 Academic framing
 
-**birdseye's problem is MC-TOP-MTW.** Candidate viewing spots are nodes with a score. Each
+**cowbells's problem is MC-TOP-MTW.** Candidate viewing spots are nodes with a score. Each
 racer passing a spot creates *one time window* at that node, so a spot on a course crossing
 with three racers has three windows and three separately-collectible rewards. Travel between
 nodes is the OSM routing time. The spectator's day is the tour-length budget. If the user
@@ -199,7 +199,7 @@ domains (they list tourism, athlete recruiting, home fuel delivery, search & res
 routing, wildfire asset protection). Two hits that look relevant are false positives — a
 ["stadium spectators" metaheuristic](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC10847446/)
 and a ["marathon runner algorithm"](https://www.degruyterbrill.com/document/doi/10.1515/mt-2023-0091/html)
-both borrow the words as naming metaphors. **birdseye's application domain appears genuinely
+both borrow the words as naming metaphors. **cowbells's application domain appears genuinely
 novel in the OR literature.**
 
 ### 1.4 Solution approaches that are practical client-side
@@ -214,7 +214,7 @@ Target: ~50–500 candidate viewing spots, 1–10 racers as reward sources, answ
 | **Ant colony optimization** | Montemanni & Gambardella (2009), *Foundations of Computing and Decision Sciences* 34(4), 287–306 | Works, but consistently the slowest of these in the literature. Poor match for a hard 1–5 s budget. |
 | **GRASP with path relinking** | Campos, Martí, Sánchez-Oro, Duarte (2014), *JORS* 65(12), 1800–1813. DOI: [10.1057/jors.2013.156](https://doi.org/10.1057/jors.2013.156) | Good quality, more machinery than ILS. |
 | **Exact label-setting DP with dominance** | Righini & Salani (2009), "Decremental state space relaxation…", *C&OR* 36(4), 1191–1203. DOI: [10.1016/j.cor.2008.01.003](https://doi.org/10.1016/j.cor.2008.01.003) | Bi-directional bounded DP with decremental state-space relaxation. Exact but combinatorially explosive — realistic only at the small end (tens of nodes, one tour). Worth having as an "exact mode" toggle for small inputs. |
-| **Pulse framework (exact)** | Duque, Lozano, Medaglia (2014), "Solving the OPTW via the pulse framework", *C&OR* 54, 168–176. DOI: [10.1016/j.cor.2014.08.019](https://doi.org/10.1016/j.cor.2014.08.019) | Reported up to 266× speedup over the prior state of the art and optimal solutions on instances up to **562 nodes** — right at birdseye's upper size bound. The strongest candidate if you want a provably-optimal mode. |
+| **Pulse framework (exact)** | Duque, Lozano, Medaglia (2014), "Solving the OPTW via the pulse framework", *C&OR* 54, 168–176. DOI: [10.1016/j.cor.2014.08.019](https://doi.org/10.1016/j.cor.2014.08.019) | Reported up to 266× speedup over the prior state of the art and optimal solutions on instances up to **562 nodes** — right at cowbells's upper size bound. The strongest candidate if you want a provably-optimal mode. |
 | Beam search over a time-expanded graph | No single canonical OPTW paper found under that name | Don't lean on this framing publicly; it's underspecified in the literature. |
 
 **The implementation detail that matters most** is the O(1) feasibility test from
@@ -230,7 +230,7 @@ VRPTW instances — the [Righini & Salani sets](https://www.mech.kuleuven.be/en/
 (`c/r/rc-100-50`, `c/r/rc-100-100`, `pr01–10`) and the
 [Montemanni & Gambardella sets](https://www.mech.kuleuven.be/en/mim/op/instances/MontemanniTOPTW1)
 (`pr11–20`). Best-known results tracked at [OPLib, SMU](http://unicen.smu.edu.sg/oplib-orienteering-problem-library).
-**Use these as birdseye's optimizer test fixtures** — they give a hard, external correctness
+**Use these as cowbells's optimizer test fixtures** — they give a hard, external correctness
 and quality signal that a hand-rolled solver otherwise lacks.
 
 ### 1.5 Duplication and licensing assessment
@@ -258,7 +258,7 @@ calculator over six hardcoded marathons. There is nothing to be accused of cloni
   license change.
 - **AGPL §13 probably does not bite for a purely static app**, but the reasoning is worth
   writing down. §13's network clause targets running a modified version on a server that
-  users interact with remotely. birdseye's engine runs on the user's own machine; serving the
+  users interact with remotely. cowbells's engine runs on the user's own machine; serving the
   JS/WASM is straightforward *conveying* under §5/§6, so the ordinary source-availability
   obligation applies and is satisfied by the public repo. That said, the FSF has never given
   a crisp answer for client-side JS ([The JavaScript Trap](https://www.gnu.org/philosophy/javascript-trap.html)
@@ -269,7 +269,7 @@ calculator over six hardcoded marathons. There is nothing to be accused of cloni
 - **Patents:** a search over race-spectator patents turned up the Huston/Coleman
   ["GPS based spectator and participant sport system"](https://image-ppubs.uspto.gov/dirsearch-public/print/downloadPdf/7855638)
   family, which covers rendering a *view of the contest from the spectator's perspective*
-  (AR/VR-flavoured), not itinerary optimization. Nothing found that reads on birdseye. This is
+  (AR/VR-flavoured), not itinerary optimization. Nothing found that reads on cowbells. This is
   not a clearance opinion.
 - **Data licensing is the one you must actually honour:** OSM data is **ODbL**. Overpass
   results, PMTiles basemaps, and any derived routing graph you redistribute all carry it.
@@ -293,7 +293,7 @@ with new maintainers ([official announcement, 2025-07-21](https://blog.rust-lang
 |---|---|---|---|
 | `wasm-bindgen` | **0.2.127** (2026-08-08); 0.2.125/0.2.126 in June 2026 | Apache-2.0 (dual MIT) | Healthy, frequent releases. Use it. |
 | `wasm-pack` | **v0.15.0** (2026-05-15), v0.14.0 (2026-01-20) — after a 15-month gap since v0.13.1 (2024-10-29) | Apache-2.0 | **Revived.** The "wasm-pack is abandoned" concern was true through 2025 and is no longer true. |
-| `trunk` | stable 0.21.14 (2025-05); v0.22.0-beta.2 (2026-07) | Apache-2.0 | Fine tool, **wrong tool here** — Trunk owns `index.html` as a build input and is built around compiling a *binary* crate with a `main`, i.e. Yew/Leptos/Dioxus ([asset docs](https://trunk-rs.github.io/trunk/guide/assets/index.html)). birdseye's engine is a `cdylib` with no `main`, driven from a JS shell. It's not incapable of that shape, but it buys nothing over `cargo build` + `wasm-bindgen`, and it would fight you over CSS/sprite/glyph pipelines that belong on the JS side. Skip it. |
+| `trunk` | stable 0.21.14 (2025-05); v0.22.0-beta.2 (2026-07) | Apache-2.0 | Fine tool, **wrong tool here** — Trunk owns `index.html` as a build input and is built around compiling a *binary* crate with a `main`, i.e. Yew/Leptos/Dioxus ([asset docs](https://trunk-rs.github.io/trunk/guide/assets/index.html)). cowbells's engine is a `cdylib` with no `main`, driven from a JS shell. It's not incapable of that shape, but it buys nothing over `cargo build` + `wasm-bindgen`, and it would fight you over CSS/sprite/glyph pipelines that belong on the JS side. Skip it. |
 | `wee_alloc` | 0.4.5, **[RUSTSEC-2022-0054: unmaintained](https://github.com/rustsec/advisory-db/blob/main/crates/wee_alloc/RUSTSEC-2022-0054.md)** — "open issues including memory leaks and may not be suitable for production use… It may be best to switch to the default Rust standard allocator on wasm32 targets" | — | **Do not use.** Your instinct was right. |
 
 **Consider skipping wasm-pack anyway.** You are not publishing to npm, so the plain pipeline
@@ -301,8 +301,8 @@ is enough and removes a moving part:
 
 ```
 cargo build --release --target wasm32-unknown-unknown
-wasm-bindgen --target web target/wasm32-unknown-unknown/release/birdseye.wasm --out-dir web/wasm
-wasm-opt -Oz -o web/wasm/birdseye_bg.wasm web/wasm/birdseye_bg.wasm
+wasm-bindgen --target web target/wasm32-unknown-unknown/release/cowbells.wasm --out-dir web/wasm
+wasm-opt -Oz -o web/wasm/cowbells_bg.wasm web/wasm/cowbells_bg.wasm
 ```
 
 Install the CLI with `cargo binstall wasm-bindgen-cli` (prebuilt). See
@@ -333,10 +333,10 @@ bundles v130, another reason to drive `wasm-opt` yourself.
 fallback. `wasm-tools` (Bytecode Alliance, 1.257.1, 2026-08) is also worth having in CI for
 `validate`/`strip`; its component-model half is irrelevant to a hand-written JS shell.
 
-For a project of birdseye's shape — geometry, a graph, a heuristic solver, no async runtime —
+For a project of cowbells's shape — geometry, a graph, a heuristic solver, no async runtime —
 **150–500 KB raw / 60–200 KB gzipped is a reasonable estimate** (extrapolated from real
 shipping modules: `lz4-wasm` 25 KB→11 KB gz; `@dimforge/rapier2d` 1.49 MB→554 KB gz; this is
-an engineering estimate, **[unverified]** for birdseye specifically). `serde_json` is
+an engineering estimate, **[unverified]** for cowbells specifically). `serde_json` is
 typically the single biggest line item at 100 KB+, which is worth weighing in §2f's
 parse-where decision.
 
@@ -358,7 +358,7 @@ Three consequences:
    "This is a scenario we would support with custom headers. No ETA at the moment" — is still
    the state of play. Cloudflare Pages supports a `_headers` file
    ([docs](https://developers.cloudflare.com/pages/configuration/headers/), max 100 rules,
-   2,000 chars per line, applies to static assets — which is all birdseye has) and Netlify
+   2,000 chars per line, applies to static assets — which is all cowbells has) and Netlify
    supports `_headers`/`netlify.toml` with COOP/COEP shown explicitly in its
    [docs](https://docs.netlify.com/routing/headers/).
 2. The [coi-serviceworker](https://github.com/gzuidhof/coi-serviceworker) workaround (MIT,
@@ -389,7 +389,7 @@ embarrassingly parallel and doesn't want shared memory.
 `serde-wasm-bindgen` (0.6.5, MIT **[measured]**) is the successor to the removed
 `JsValue::from_serde`/`into_serde` and describes itself as "nowadays… the officially
 preferred approach" ([repo](https://github.com/RReverser/serde-wasm-bindgen)). **But its
-"faster than JSON" claim does not hold for birdseye's data shape.** wasm-bindgen's own guide
+"faster than JSON" claim does not hold for cowbells's data shape.** wasm-bindgen's own guide
 says JSON "can be anywhere from 2x to 0.2x the speed" and tells you to profile. On
 string-heavy, deeply-nested data — which is exactly what an Overpass response with `tags`
 maps is — measurements in
@@ -432,10 +432,10 @@ dependencies, which is what makes them WASM-safe.
 
 | Crate | Version | License | Notes |
 |---|---|---|---|
-| [`geo`](https://docs.rs/geo/latest/geo/) | **0.33.1** | MIT OR Apache-2.0 | Has everything birdseye needs: `Simplify` (Douglas–Peucker) and `SimplifyVw`, `Densify`, `InterpolateLine`/`InterpolatePoint`, `LineLocatePoint`, `ClosestPoint` and `HaversineClosestPoint`, `BooleanOps` + `unary_union`, `Contains`/`Intersects`/`Relate` (DE-9IM), `ConvexHull`/`ConcaveHull`, `TriangulateEarcut`/`TriangulateDelaunay`, geodesic distance/area. **WASM is CI-verified**: `geo` gained a dedicated `wasm32-unknown-unknown` check job in January 2026 after the build was found broken and fixed ([PR #1492](https://github.com/georust/geo/pull/1492)) — which means **pre-0.32 `geo` was not reliably WASM-clean, so pin ≥0.33**. `proj` is only an optional feature; no C deps by default. |
+| [`geo`](https://docs.rs/geo/latest/geo/) | **0.33.1** | MIT OR Apache-2.0 | Has everything cowbells needs: `Simplify` (Douglas–Peucker) and `SimplifyVw`, `Densify`, `InterpolateLine`/`InterpolatePoint`, `LineLocatePoint`, `ClosestPoint` and `HaversineClosestPoint`, `BooleanOps` + `unary_union`, `Contains`/`Intersects`/`Relate` (DE-9IM), `ConvexHull`/`ConcaveHull`, `TriangulateEarcut`/`TriangulateDelaunay`, geodesic distance/area. **WASM is CI-verified**: `geo` gained a dedicated `wasm32-unknown-unknown` check job in January 2026 after the build was found broken and fixed ([PR #1492](https://github.com/georust/geo/pull/1492)) — which means **pre-0.32 `geo` was not reliably WASM-clean, so pin ≥0.33**. `proj` is only an optional feature; no C deps by default. |
 | `geo-types` | 0.7.20 | MIT OR Apache-2.0 | The primitive types; you'll depend on it transitively. |
 | [`rstar`](https://github.com/georust/rstar) | **0.13.0** | Apache-2.0 (dual MIT) | R*-tree. 555 stars, last push 2026-08-13 **[measured]**. Pure Rust (`heapless`, `num-traits`/`libm`, `smallvec`), transitively WASM-verified via `geo`'s CI. Use it for snapping points to the graph and for candidate-spot queries. **Version-skew warning:** released `geo` 0.33.1 pins `rstar ^0.12` while `geo` main has moved to 0.13 — don't add a direct `rstar 0.13` dependency alongside released `geo` 0.33.1 or you'll get two incompatible `rstar`s. |
-| `petgraph` | 0.8.3 | MIT OR Apache-2.0 | Mature and well maintained, but **skip it for the routing graph.** Two concrete reasons: (1) `Graph` uses intrusive singly-linked adjacency lists, not CSR — ~8 bytes/node + 16 bytes/edge of pure overhead; (2) more importantly, **`petgraph::algo::dijkstra` returns only a `HashMap<NodeId, Cost>` with no predecessors, so you cannot reconstruct a path from it**, and `astar` hashes dense `u32` node IDs on every relaxation. birdseye needs custom search anyway (many-to-many with early termination, custom costs), which doesn't fit petgraph's closed signatures. `petgraph::csr::Csr` exists but maintainers flag it as panic-prone pending rework ([#724](https://github.com/petgraph/petgraph/issues/724)). Hand-roll ~100–300 lines instead. **[unverified]** as a benchmark — this is reasoning from verified struct definitions, not measurement. |
+| `petgraph` | 0.8.3 | MIT OR Apache-2.0 | Mature and well maintained, but **skip it for the routing graph.** Two concrete reasons: (1) `Graph` uses intrusive singly-linked adjacency lists, not CSR — ~8 bytes/node + 16 bytes/edge of pure overhead; (2) more importantly, **`petgraph::algo::dijkstra` returns only a `HashMap<NodeId, Cost>` with no predecessors, so you cannot reconstruct a path from it**, and `astar` hashes dense `u32` node IDs on every relaxation. cowbells needs custom search anyway (many-to-many with early termination, custom costs), which doesn't fit petgraph's closed signatures. `petgraph::csr::Csr` exists but maintainers flag it as panic-prone pending rework ([#724](https://github.com/petgraph/petgraph/issues/724)). Hand-roll ~100–300 lines instead. **[unverified]** as a benchmark — this is reasoning from verified struct definitions, not measurement. |
 | [`gpx`](https://github.com/georust/gpx) | **0.10.0** (released 2023-12) | MIT | georust-maintained, 122 stars. **Correction to a common assumption: it uses `xml-rs`, not `quick-xml`.** Semi-dormant — ~40 unreleased commits on master, PRs stalled ~9 months. Dependency tree is pure Rust so WASM should work, but there's no wasm CI job — **[unverified]**, prove it with an early `wasm-bindgen-test`. **Consider parsing GPX in JS instead** with [`@tmcw/togeojson`](https://www.npmjs.com/package/@tmcw/togeojson) (7.1.2, BSD-2 **[measured]**) — you need the track as GeoJSON for MapLibre anyway. A ~150-line hand-rolled `quick-xml` (0.42.0, very active) parser over just `<trkpt>`/`<ele>`/`<time>`/`<wpt>` is also a credible option. |
 | [`proj4rs`](https://docs.rs/proj4rs/latest/proj4rs/) | 0.1.10 | MIT OR Apache-2.0 | Pure-Rust Proj4 port that **explicitly targets WASM** (has a `wasm-strict` feature and JS console adaptors). Only 42% documented; nadgrid support experimental. |
 | `geographiclib-rs` | 0.2.7 | MIT | High-accuracy geodesics if you need them; `geo`'s geodesic algorithms likely suffice. |
@@ -520,7 +520,7 @@ aggressively (`geo`'s `Simplify`) before building one, and cap vertex count per 
 
 **Map matching is not needed.** There is no maintained Rust HMM map-matching crate
 (`rhmm`/`hmmm` exist as generic HMM libraries; no OSM-specific one found). Fortunately
-birdseye doesn't need it: the course is its own polyline used as-is, and snapping candidate
+cowbells doesn't need it: the course is its own polyline used as-is, and snapping candidate
 viewing spots to the graph is a nearest-edge query, which is an `rstar` lookup.
 
 ### 2c. In-browser routing: build it yourself
@@ -620,7 +620,7 @@ vector-tile rendering on the GPU, and globe projection since v5. v6 dropped WebG
 is now required, which is fine for any browser you'd target in 2026. For performance with
 many features, follow the [Large Data guide](https://maplibre.org/maplibre-gl-js/docs/guides/large-data/):
 use one GeoJSON source with a `FeatureCollection` and symbol/line layers rather than DOM
-`Marker` objects. birdseye's feature counts (a course, a few hundred candidate spots, an
+`Marker` objects. cowbells's feature counts (a course, a few hundred candidate spots, an
 itinerary) are far below where this bites.
 
 Leaflet's 2.0 has been in alpha since 2025-05 with a tracking issue whose target date reads
@@ -692,7 +692,7 @@ IP is the operative constraint, not bandwidth.
 probe an hour later got clean 200s. Treat availability as genuinely variable and rotate.)
 The canonical instance list lives on the [OSM wiki](https://wiki.openstreetmap.org/wiki/Overpass_API);
 Overpass Turbo now generates its own server picker from that table
-([PR #854](https://github.com/tyrasd/overpass-turbo/pull/854)) — birdseye should treat the
+([PR #854](https://github.com/tyrasd/overpass-turbo/pull/854)) — cowbells should treat the
 wiki as the source of truth rather than hardcoding.
 
 **Practical bbox size — measured, not guessed.** Query: all `way["highway"]` plus
@@ -711,7 +711,7 @@ So for a worst-case-dense urban area: ~4 MB over the wire, ~4 s server-side, ~17
 parse. That is fine for a one-off fetch, and **badly antisocial to repeat**. Cache it.
 
 Note this used `out skel` (ids + geometry, no tags), which requires a second pass to resolve
-way coordinates. For birdseye you actually need tags (to classify footway vs. cycleway vs.
+way coordinates. For cowbells you actually need tags (to classify footway vs. cycleway vs.
 private service road, and to respect `barrier=*`/`access=*`), so plan on **`out body geom qt;`**
 — geometry inlined, tags included, one pass. That will be somewhat larger than the numbers
 above; measure before assuming.
@@ -810,13 +810,13 @@ correctness signal a hand-rolled optimizer will ever get.
 **R1 — Overpass availability and rate limiting on race morning (highest, and the one most
 likely to actually bite).** Two slots per IP **[measured]**, 429s issued aggressively
 **[measured]**, and public instances that were returning 500s earlier the same day I probed
-them returning 200s. If twenty spectators at the same race open birdseye within a minute, they
+them returning 200s. If twenty spectators at the same race open cowbells within a minute, they
 are not sharing an IP, so per-IP limits aren't the problem — but a 4 s / 4 MB query per user
 on donated infrastructure for a race that happens every year is exactly the pattern the
 policy calls antisocial. *Mitigation: the pre-baked hybrid in §2e. This risk is entirely
 designable-away for known courses.*
 
-**R2 — Modelling credibility (underrated).** birdseye's output is only as good as its arrival
+**R2 — Modelling credibility (underrated).** cowbells's output is only as good as its arrival
 windows, and pace prediction is genuinely hard. The Riegel formula
 (T₂ = T₁ × (D₂/D₁)^1.06) is accurate to ±3–5% for 5K→10K but "dramatically underestimated
 marathon time, giving times at least 10 min too fast for half of runners"
@@ -885,7 +885,7 @@ recommendations. The one to actually watch is `gpx`; have the `quick-xml` fallba
    structured payloads, and never cache a typed-array view across a call that can grow WASM
    memory ([#4395](https://github.com/wasm-bindgen/wasm-bindgen/issues/4395)).
 6. **Make pace uncertainty a first-class UI concept, and add "I just saw them at X" re-solve.**
-   This is the feature that turns R2 from a weakness into birdseye's differentiator, and
+   This is the feature that turns R2 from a weakness into cowbells's differentiator, and
    nothing in §1 does it.
 7. **Deploy to Cloudflare Pages or Netlify** for header control and correct WASM MIME types.
    Add a "Source" link in the footer, "© OpenStreetMap contributors" attribution in the map

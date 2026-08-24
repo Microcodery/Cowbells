@@ -1,8 +1,8 @@
 //! Wires the pieces together and turns a plan back into a human-facing itinerary.
 
-use birdseye_core::geom::{Point, Projection};
-use birdseye_core::{Event, LatLon, Seconds};
-use birdseye_routing::{NodeId, TravelTime};
+use cowbells_core::geom::{Point, Projection};
+use cowbells_core::{Event, LatLon, Seconds};
+use cowbells_routing::{NodeId, TravelTime};
 use fixedbitset::FixedBitSet;
 use geo::{Distance, Euclidean};
 use serde::Serialize;

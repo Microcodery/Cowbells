@@ -82,7 +82,7 @@ export function renderHeader(root, event, ui, actions) {
   const ready = event.courses.length && event.racers.length;
   const why = event.courses.length ? (event.racers.length ? "Plan where to stand" : "Add a racer first") : "Add a course first";
   root.innerHTML = `
-    <h1>birdseye</h1>
+    <h1>cowbells</h1>
     <button data-act="plan" class="plan ${ready ? "ready" : "missing"}" ${ui.busy ? "disabled" : ""} title="${why}">Plan</button>
     <span class="row">
       <button data-act="toggleTier" class="tier ${ui.tier}" title="${tierSummary()}">${TIERS[ui.tier].label}</button>

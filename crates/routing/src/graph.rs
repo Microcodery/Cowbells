@@ -3,8 +3,8 @@
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashMap};
 
-use birdseye_core::geom::{Point, Polygon, Polyline, Projection, chord_inside, coords};
-use birdseye_core::{Seconds, TravelMode};
+use cowbells_core::geom::{Point, Polygon, Polyline, Projection, chord_inside, coords};
+use cowbells_core::{Seconds, TravelMode};
 use geo::line_intersection::{LineIntersection, line_intersection};
 use geo::{BoundingRect, Distance, Euclidean, Intersects, Line, LineString};
 use rstar::primitives::GeomWithData;
@@ -359,7 +359,7 @@ impl PartialOrd for Visit {
 #[cfg(test)]
 mod tests {
     use approx::assert_abs_diff_eq;
-    use birdseye_core::LatLon;
+    use cowbells_core::LatLon;
     use geo::polygon;
 
     use super::*;

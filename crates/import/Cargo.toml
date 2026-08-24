@@ -1,11 +1,11 @@
 [package]
-name = "birdseye-import"
+name = "cowbells-import"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [dependencies]
-birdseye-core.workspace = true
+cowbells-core.workspace = true
 fitparser = "0.11"
 gpx = "0.10"
 quick-xml = "0.37"

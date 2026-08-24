@@ -1,8 +1,8 @@
-# birdseye
+# cowbells
 
 Spectator planning for races (running, cycling, triathlon, and similar).
 
-Given the course route(s) and each racer's estimated pace, birdseye computes
+Given the course route(s) and each racer's estimated pace, cowbells computes
 where a spectator should stand — and when — to see as many of the racers they
 care about as possible, moving between viewpoints on real roads and paths.
 

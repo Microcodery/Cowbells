@@ -15,7 +15,7 @@ const STYLES = {
   dark: "https://tiles.openfreemap.org/styles/dark",
 };
 
-const THEME_KEY = "birdseye.theme";
+const THEME_KEY = "cowbells.theme";
 // A theme chosen on an earlier visit is applied before the first paint; with none, the system's
 // preference stands and keeps following it.
 const storedTheme = localStorage.getItem(THEME_KEY);

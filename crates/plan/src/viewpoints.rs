@@ -1,9 +1,9 @@
 //! Viewpoints: spectator-network positions within sight of a stretch of course,
 //! and when each racer passes through that stretch.
 
-use birdseye_core::geom::{Point, Polyline, Projection, coords};
-use birdseye_core::{Event, Seconds, Trajectory, Window};
-use birdseye_routing::{NodeId, TravelTime};
+use cowbells_core::geom::{Point, Polyline, Projection, coords};
+use cowbells_core::{Event, Seconds, Trajectory, Window};
+use cowbells_routing::{NodeId, TravelTime};
 use geo::{Distance, Euclidean};
 use rstar::RTree;
 use rstar::primitives::GeomWithData;

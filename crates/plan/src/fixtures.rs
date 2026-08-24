@@ -1,8 +1,8 @@
 //! A small grid event the viewpoint and itinerary tests both build on.
 
-use birdseye_core::geom::{Point, Projection};
-use birdseye_core::*;
-use birdseye_routing::Graph;
+use cowbells_core::geom::{Point, Projection};
+use cowbells_core::*;
+use cowbells_routing::Graph;
 
 pub const ORIGIN: LatLon = LatLon { lat: 45.0, lon: -122.0 };
 

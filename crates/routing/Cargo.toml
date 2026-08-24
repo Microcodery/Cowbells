@@ -1,11 +1,11 @@
 [package]
-name = "birdseye-routing"
+name = "cowbells-routing"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [dependencies]
-birdseye-core.workspace = true
+cowbells-core.workspace = true
 geo = { version = "0.33.1", default-features = false }
 rstar = "0.13.0"
 serde = { version = "1.0.229", features = ["derive"] }

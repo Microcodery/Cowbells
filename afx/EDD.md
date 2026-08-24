@@ -1,4 +1,4 @@
-# birdseye — Engineering Design Document
+# cowbells — Engineering Design Document
 
 Bridges [SPEC.md](SPEC.md) (what) and [PLAN.md](PLAN.md) (when). Covers architecture, data model, algorithms, and the decisions behind them.
 

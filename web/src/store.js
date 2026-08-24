@@ -1,6 +1,6 @@
 // Map data is too big for localStorage, so it lives in IndexedDB and survives a reload.
 
-const DB = "birdseye";
+const DB = "cowbells";
 const STORE = "mapdata";
 const KEY = "current";
 

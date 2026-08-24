@@ -1,7 +1,7 @@
 //! GPX: one course per track (or per route when there are no tracks), one segment per
 //! track segment.
 
-use birdseye_core::LatLon;
+use cowbells_core::LatLon;
 
 use crate::ImportError;
 

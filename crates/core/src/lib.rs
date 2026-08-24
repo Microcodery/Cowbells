@@ -1,4 +1,4 @@
-//! Domain model, geometry, and trajectories for birdseye.
+//! Domain model, geometry, and trajectories for cowbells.
 
 pub mod geom;
 pub mod model;
