@@ -5,7 +5,7 @@ members = ["crates/core", "crates/import", "crates/routing", "crates/plan", "cra
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
-license = "AGPL-3.0-only"
+license = "BUSL-1.1"
 
 [workspace.dependencies]
 birdseye-core = { path = "crates/core" }

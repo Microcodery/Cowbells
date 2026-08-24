@@ -103,7 +103,7 @@ It runs entirely in the browser as a static web page. No account, no server-side
 - **Performance:** planning for 3 courses × 30 racers × 5 km² completes in under 10 s on a mid-range laptop; UI never blocks.
 - **Correctness first:** the engine is deterministic and unit-tested independently of the browser.
 - **Accessibility:** keyboard-navigable forms; results readable without the map.
-- **License:** AGPL-3.0.
+- **License:** BSL 1.1 (converts to Apache 2.0 on the change date).
 
 ## Out of scope for v1
 

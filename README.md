@@ -100,4 +100,5 @@ the fetched data so a reload never needs them. Expect rough edges; see
 
 ## License
 
-[AGPL-3.0](LICENSE)
+[Business Source License 1.1](LICENSE): free to use and self-host, but not to resell
+as a hosted service; each version converts to Apache 2.0 on its change date.
