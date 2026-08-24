@@ -1,34 +1,42 @@
 :root {
   color-scheme: light dark;
-  --bg: #fafaf9;
-  --fg: #1c1917;
-  --muted: #78716c;
-  --accent: #2563eb;
+  /* One Light */
+  --bg: #fafafa;
+  --fg: #383a42;
+  --muted: #696c77;
+  --accent: #4078f2;
   --panel: #ffffff;
-  --border: #e7e5e4;
-  --warn: #b45309;
+  --border: #dbdbdc;
+  --ok: #50a14f;
+  --danger: #e45649;
+  --warn: #986801;
 }
 
+/* One Dark */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg: #1c1917;
-    --fg: #fafaf9;
-    --muted: #a8a29e;
-    --accent: #60a5fa;
-    --panel: #292524;
-    --border: #44403c;
-    --warn: #fbbf24;
+    --bg: #282c34;
+    --fg: #abb2bf;
+    --muted: #9099a3;
+    --accent: #61afef;
+    --panel: #21252b;
+    --border: #3e4451;
+    --ok: #98c379;
+    --danger: #e06c75;
+    --warn: #e5c07b;
   }
 }
 
 :root[data-theme="dark"] {
-  --bg: #1c1917;
-  --fg: #fafaf9;
-  --muted: #a8a29e;
-  --accent: #60a5fa;
-  --panel: #292524;
-  --border: #44403c;
-  --warn: #fbbf24;
+  --bg: #282c34;
+  --fg: #abb2bf;
+  --muted: #9099a3;
+  --accent: #61afef;
+  --panel: #21252b;
+  --border: #3e4451;
+  --ok: #98c379;
+  --danger: #e06c75;
+  --warn: #e5c07b;
 }
 
 * {
@@ -101,7 +109,7 @@ body {
   top: 0;
   bottom: 0;
   width: 18%;
-  background: linear-gradient(90deg, transparent, rgba(37, 99, 235, 0.28), transparent);
+  background: linear-gradient(90deg, transparent, rgba(64, 120, 242, 0.25), transparent);
   animation: scan 1.4s linear infinite;
 }
 
@@ -152,18 +160,18 @@ h1 {
 }
 
 button.plan {
-  color: #fff;
-  border-color: transparent;
   padding: 6px 18px;
   font-weight: 600;
 }
 
 button.plan.ready {
-  background: #16a34a;
+  color: var(--ok);
+  border-color: var(--ok);
 }
 
 button.plan.missing {
-  background: #dc2626;
+  color: var(--danger);
+  border-color: var(--danger);
 }
 
 button.locked {
@@ -191,7 +199,7 @@ button.locked .lock .icon {
 }
 
 .banner {
-  background: #dc2626;
+  background: var(--danger);
   color: #fff;
   padding: 8px 10px;
   margin: 10px 0 4px;
@@ -215,9 +223,9 @@ button.locked .lock .icon {
 }
 
 button.tier.plus {
-  background: #7c3aed;
-  color: #fff;
-  border-color: transparent;
+  color: var(--accent);
+  border-color: var(--accent);
+  font-weight: 600;
 }
 
 h2 {
@@ -230,8 +238,8 @@ h2 {
 
 .card {
   border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 8px;
+  border-radius: 10px;
+  padding: 10px;
   margin-bottom: 8px;
 }
 
@@ -288,10 +296,16 @@ button,
 .button {
   font: inherit;
   color: inherit;
-  background: var(--bg);
+  background: transparent;
   border: 1px solid var(--border);
-  border-radius: 4px;
-  padding: 3px 6px;
+  border-radius: 8px;
+  padding: 4px 8px;
+  min-height: 28px;
+}
+
+:is(input, select, button, .button, summary):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 
 button,
@@ -299,16 +313,17 @@ button,
   cursor: pointer;
 }
 
-button .icon {
+.icon {
   width: 1em;
   height: 1em;
+  flex: 0 0 auto;
   vertical-align: -0.15em;
 }
 
 button.active {
-  background: var(--accent);
-  color: #fff;
+  color: var(--accent);
   border-color: var(--accent);
+  font-weight: 600;
 }
 
 button:disabled {
@@ -357,6 +372,49 @@ details.section > summary h2 {
   display: inline-flex;
   width: calc(100% - 1.5em);
   margin: 12px 0 6px;
+}
+
+/* Rarely-touched controls sit behind a gear. */
+details.advanced {
+  margin-top: 8px;
+}
+
+details.advanced > summary {
+  list-style: none;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 28px;
+  color: var(--muted);
+  font-size: 12px;
+  padding: 3px 8px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+}
+
+details.advanced > summary::-webkit-details-marker {
+  display: none;
+}
+
+details.advanced > summary:hover,
+details.advanced[open] > summary {
+  color: var(--fg);
+  border-color: var(--border);
+}
+
+details.advanced > summary .icon {
+  width: 1.15em;
+  height: 1.15em;
+}
+
+details.advanced[open] {
+  border-top: 1px dashed var(--border);
+  padding-top: 8px;
+}
+
+details.advanced[open] > summary {
+  margin-bottom: 8px;
 }
 
 .fields > label > input[type="checkbox"] {
@@ -440,7 +498,8 @@ details.section > summary h2 {
   input,
   select,
   button,
-  .button {
+  .button,
+  details.advanced > summary {
     font-size: 16px;
     min-height: 36px;
   }

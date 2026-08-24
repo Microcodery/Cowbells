@@ -15,7 +15,7 @@ const STYLES = {
   dark: "https://tiles.openfreemap.org/styles/dark",
 };
 
-const COURSE_COLORS = ["#2563eb", "#db2777", "#16a34a", "#d97706", "#7c3aed", "#0891b2", "#b45309", "#4b5563"];
+const COURSE_COLORS = ["#4078f2", "#e45649", "#50a14f", "#c18401", "#0184bc", "#986801", "#e06c75", "#5c6370"];
 
 const SOURCES = [
   "courses",
@@ -74,7 +74,7 @@ function addLayers(map) {
   for (const [name, image] of Object.entries(icons())) {
     if (!map.hasImage(name)) map.addImage(name, image, { pixelRatio: 2 });
   }
-  map.addLayer({ id: "regions", type: "fill", source: "regions", paint: { "fill-color": "#a855f7", "fill-opacity": 0.2 } });
+  map.addLayer({ id: "regions", type: "fill", source: "regions", paint: { "fill-color": "#4078f2", "fill-opacity": 0.15 } });
   // Sighting circles sit under the course lines so the course stays readable during replay.
   map.addLayer({
     id: "replay-fills",
@@ -186,8 +186,8 @@ export function render(map, event, itinerary, editingCourse = null) {
   map.getSource("vertices").setData(collection(vertices));
 
   const spectator = [];
-  if (event.spectator.start) spectator.push(feature(pointOf(event.spectator.start), { color: "#16a34a" }));
-  if (event.spectator.end) spectator.push(feature(pointOf(event.spectator.end.location), { color: "#dc2626" }));
+  if (event.spectator.start) spectator.push(feature(pointOf(event.spectator.start), { color: "#50a14f" }));
+  if (event.spectator.end) spectator.push(feature(pointOf(event.spectator.end.location), { color: "#e45649" }));
   map.getSource("spectator").setData(collection(spectator));
   map.getSource("regions").setData(collection(event.spectator.required_regions.map((r) => feature(circleOf(r.center, r.radius_m)))));
 

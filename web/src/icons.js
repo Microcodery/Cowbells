@@ -1,8 +1,8 @@
 // Map marker images drawn on a canvas: start/finish dots and the course direction arrow.
 
 const SIZE = 32;
-const START = "#16a34a";
-const FINISH = "#dc2626";
+const START = "#50a14f";
+const FINISH = "#e45649";
 
 /** Names are prefixed so they never collide with the basemap sprite's own icons. */
 export const ICON_PREFIX = "birdseye-";

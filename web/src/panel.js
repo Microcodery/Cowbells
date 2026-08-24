@@ -117,8 +117,8 @@ function coursesSection(event, ui) {
       .map(
         (course, ci) => `<div class="card">
       <div class="row">
-        <input data-field="courseName" data-ci="${ci}" value="${esc(course.name)}">
-        <button data-act="removeCourse" data-ci="${ci}" title="Remove course">${TRASH}</button>
+        <input data-field="courseName" data-ci="${ci}" value="${esc(course.name)}" aria-label="Course name">
+        <button data-act="removeCourse" data-ci="${ci}" title="Remove course" aria-label="Remove course">${TRASH}</button>
       </div>
       <div class="fields">
         <label>starts <input type="time" data-field="courseStart" data-ci="${ci}" value="${state.clock(course.start_time)}"></label>
@@ -156,30 +156,47 @@ function racersSection(event, ui) {
         (racer, ri) => `<details class="card" data-section="racer-${racer.id}" open>
       <summary><b>${esc(racer.name)}</b> <span class="muted">${esc(event.courses.find((c) => c.id === racer.course_id)?.name ?? "")} · ${state.paceLabel(racer.pace_profile[0]?.seconds_per_km ?? 0, ui.unit)}/${ui.unit.label}</span></summary>
       <div class="row">
-        <input data-field="racerName" data-ri="${ri}" value="${esc(racer.name)}">
-        <button data-act="removeRacer" data-ri="${ri}" title="Remove racer">${TRASH}</button>
+        <input data-field="racerName" data-ri="${ri}" value="${esc(racer.name)}" aria-label="Racer name">
+        <button data-act="removeRacer" data-ri="${ri}" title="Remove racer" aria-label="Remove racer">${TRASH}</button>
       </div>
       <div class="fields">
         <label>course <select data-field="racerCourse" data-ri="${ri}">${event.courses.map((c) => `<option value="${c.id}" ${c.id === racer.course_id ? "selected" : ""}>${esc(c.name)}</option>`).join("")}</select></label>
+        ${
+          racer.pace_profile.length === 1
+            ? `<label>pace <span><input data-field="pace" data-ri="${ri}" data-ii="0" value="${state.paceLabel(racer.pace_profile[0].seconds_per_km, ui.unit)}" size="5" title="min:sec per ${ui.unit.label}" aria-label="Pace"> /${ui.unit.label}</span></label>`
+            : `<label>pace <span class="muted">${racer.pace_profile.length} intervals ${GEAR}</span></label>`
+        }
+      </div>
+      ${advanced(
+        `racer-${racer.id}-adv`,
+        `<div class="fields">
         <label>start offset <span><input type="number" data-field="racerOffset" data-ri="${ri}" value="${racer.start_offset_s / 60}" step="1" size="4"> min</span></label>
         <label>priority <input type="number" data-field="racerPriority" data-ri="${ri}" value="${racer.priority}" step="0.5" min="0" size="3"></label>
         <label>prefer <select data-field="racerPrefer" data-ri="${ri}" title="which sighting of this racer matters most">
           ${options(["finish", "neutral", "en_route"], racer.prefer ?? "finish", { finish: "the finish", neutral: "during, then finish", en_route: "during, always" })}
         </select></label>
       </div>
-      <div class="paces">
+      ${
+        racer.pace_profile.length === 1
+          ? `<div class="row">
+        <label>&plusmn; <input type="number" data-field="uncertainty" data-ri="${ri}" data-ii="0" value="${Math.round(racer.pace_profile[0].uncertainty * 100)}" min="0" max="99" size="2" aria-label="Pace uncertainty">%</label>
+        ${state.tierLocks(event, ui.tier).pace(racer) ? addButton("splitInterval", true, "pace", "Split pace") : `<button data-act="splitInterval" data-ri="${ri}" data-ii="0" title="Split into two intervals at half distance">Split pace</button>`}
+      </div>`
+          : `<div class="paces">
         ${racer.pace_profile
           .map(
             (p, ii) => `<div class="row">
-          <span class="muted">${(p.start_m * ui.unit.perMetre).toFixed(1)}–${state.distanceLabel(p.end_m, ui.unit, 1)}</span>
-          <input data-field="pace" data-ri="${ri}" data-ii="${ii}" value="${state.paceLabel(p.seconds_per_km, ui.unit)}" size="5" title="min:sec per ${ui.unit.label}">
-          ± <input type="number" data-field="uncertainty" data-ri="${ri}" data-ii="${ii}" value="${Math.round(p.uncertainty * 100)}" min="0" max="99" size="2">%
-          ${state.tierLocks(event, ui.tier).pace(racer) ? addButton("splitInterval", true, "pace", "⋯") : `<button data-act="splitInterval" data-ri="${ri}" data-ii="${ii}" title="Split this interval in half">⋯</button>`}
-          ${ii + 1 < racer.pace_profile.length ? `<button data-act="mergeInterval" data-ri="${ri}" data-ii="${ii}" title="Merge with next">merge ↓</button>` : ""}
+          <span class="muted">${(p.start_m * ui.unit.perMetre).toFixed(1)}&ndash;${state.distanceLabel(p.end_m, ui.unit, 1)}</span>
+          <input data-field="pace" data-ri="${ri}" data-ii="${ii}" value="${state.paceLabel(p.seconds_per_km, ui.unit)}" size="5" title="min:sec per ${ui.unit.label}" aria-label="Pace">
+          &plusmn; <input type="number" data-field="uncertainty" data-ri="${ri}" data-ii="${ii}" value="${Math.round(p.uncertainty * 100)}" min="0" max="99" size="2" aria-label="Pace uncertainty">%
+          ${state.tierLocks(event, ui.tier).pace(racer) ? addButton("splitInterval", true, "pace", "\u22ef") : `<button data-act="splitInterval" data-ri="${ri}" data-ii="${ii}" title="Split this interval in half">\u22ef</button>`}
+          ${ii + 1 < racer.pace_profile.length ? `<button data-act="mergeInterval" data-ri="${ri}" data-ii="${ii}" title="Merge with next">merge \u2193</button>` : ""}
         </div>`,
           )
           .join("")}
-      </div>
+      </div>`
+      }`,
+      )}
     </details>`,
       )
       .join("")}
@@ -191,19 +208,23 @@ function spectatorSection(event, ui) {
   const tool = (kind) => ui.tool?.kind === kind;
   return `<details class="section" data-section="spectator">
     <summary><h2>Spectator</h2></summary>
-    <div class="row">
-      ${toolButton("setStart", tool("start"), s.start ? "Move start" : "Set start", "Click the map")}
-      ${s.start ? `<button data-act="clearStart" title="Remove start; the planner chooses">${TRASH}</button>` : `<span class="muted">planner chooses</span>`}
-    </div>
     <div class="fields">
-      <label>from <input type="time" data-field="earliest" value="${state.clock(s.earliest)}"></label>
+      <label>out from <input type="time" data-field="earliest" value="${state.clock(s.earliest)}"></label>
+      ${s.mode === "drive" ? "" : `<label>${s.mode} speed <span><input type="number" data-field="speed" value="${state.speedLabel(s.speed_mps ?? state.DEFAULT_SPEED_MPS[s.mode], ui.unit)}" min="0.5" step="0.5" size="4" title="your pace on ordinary streets"> ${ui.unit.speed}</span></label>`}
+    </div>
+    ${advanced(
+      "spectator-adv",
+      `<div class="fields">
       <label>until <input type="time" data-field="latest" value="${s.latest ? state.clock(s.latest) : ""}"></label>
       <label>travel <select data-field="travel">${options(TRAVEL, s.mode)}</select></label>
-      ${s.mode === "drive" ? "" : `<label>speed <span><input type="number" data-field="speed" value="${state.speedLabel(s.speed_mps ?? state.DEFAULT_SPEED_MPS[s.mode], ui.unit)}" min="0.5" step="0.5" size="4" title="your pace on ordinary streets"> ${ui.unit.speed}</span></label>`}
+    </div>
+    <div class="row">
+      ${toolButton("setStart", tool("start"), s.start ? "Move start" : "Set start", "Click the map")}
+      ${s.start ? `<button data-act="clearStart" title="Remove start; the planner chooses" aria-label="Remove start">${TRASH}</button>` : `<span class="muted">planner chooses</span>`}
     </div>
     <div class="row">
       ${toolButton("setEnd", tool("end"), s.end ? "Move end" : "Set end", "Click the map")}
-      ${s.end ? `<label>by <input type="time" data-field="endLatest" value="${state.clock(s.end.latest)}"></label><button data-act="clearEnd" title="Remove end point">${TRASH}</button>` : ""}
+      ${s.end ? `<label>by <input type="time" data-field="endLatest" value="${state.clock(s.end.latest)}"></label><button data-act="clearEnd" title="Remove end point" aria-label="Remove end point">${TRASH}</button>` : ""}
     </div>
     <div class="row">
       ${toolButton("addRegion", tool("region"), "Add must-visit area", "Click the map")}
@@ -213,10 +234,19 @@ function spectatorSection(event, ui) {
         (r, gi) => `<div class="row">
       <span class="muted">area ${gi + 1}</span>
       <label>r <input type="number" data-field="regionRadius" data-gi="${gi}" value="${r.radius_m}" min="10" size="4"> m</label>
-      <button data-act="removeRegion" data-gi="${gi}" title="Remove area">${TRASH}</button>
+      <button data-act="removeRegion" data-gi="${gi}" title="Remove area" aria-label="Remove area">${TRASH}</button>
     </div>`,
       )
-      .join("")}
+      .join("")}`,
+    )}
+  </details>`;
+}
+
+/** Rarely-touched controls behind a gear, folded until asked for. */
+function advanced(section, content) {
+  return `<details class="advanced" data-section="${section}">
+    <summary title="Advanced" aria-label="Advanced">${GEAR}<span>advanced</span></summary>
+    ${content}
   </details>`;
 }
 
@@ -234,7 +264,7 @@ function debugSection(ui) {
 function settingsSection(event, ui) {
   const s = event.spectator;
   return `<details class="section" data-section="settings">
-      <summary><h2>Settings</h2></summary>
+      <summary><h2>Advanced settings</h2></summary>
       <div class="fields">
         <label>sighting radius <span><input type="number" data-field="radius" value="${s.sighting_radius_m}" min="5" size="3"> m</span></label>
         <label>skip first <span><input type="number" data-field="skipStart" value="${((s.skip_start_m ?? 1600) * ui.unit.perMetre).toFixed(1)}" min="0" step="0.1" size="4" title="the crowded start of each course is not worth a stop"> ${ui.unit.label}</span></label>
@@ -291,6 +321,8 @@ function selectorFor(element) {
 const RELEASES = "https://github.com/Microcodery/cowbells/releases";
 
 const LOCK = `<svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.5" d="M4.5 7V5a3.5 3.5 0 0 1 7 0v2"/><rect x="3" y="7" width="10" height="7" rx="1.5" fill="currentColor"/></svg>`;
+
+const GEAR = `<svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="2.2" fill="none" stroke="currentColor" stroke-width="1.4"/><path fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" d="M8 1.6v2.1M8 12.3v2.1M1.6 8h2.1M12.3 8h2.1M3.5 3.5l1.5 1.5M11 11l1.5 1.5M12.5 3.5 11 5M5 11l-1.5 1.5"/></svg>`;
 
 /** An "add" button, or the same button greyed under a lock when the tier has no room for another `what`. */
 const addButton = (act, locked, what, label = "+") =>
