@@ -1,40 +1,46 @@
+// The app: map, panel, and engine wired together, and the actions the panel fires.
+
 import "./style.css";
+import { exploreAlternatives } from "./alternatives.js";
+import { debugDefaults } from "./debug.js";
 import { createEngine } from "./engine.js";
+import {
+  addCourse,
+  addPoint,
+  addRacer,
+  addRegion,
+  assignCourse,
+  looksLikeEvent,
+  mergeInterval,
+  mergeWithNext,
+  newEvent,
+  rebase,
+  reconcileProfiles,
+  removeCourse,
+  splitInterval,
+  splitSegment,
+  undoPoint,
+} from "./event.js";
+import { UNITS, laterThan, parsePace, todayAt, withClock } from "./format.js";
+import { invalidatePlan, planGeneration } from "./generation.js";
+import { arrivalsAt, distanceAlong, largestCourse, nearestOnCourses, nearestOnEachCourse } from "./geo.js";
 import { itineraryToGpx } from "./gpx.js";
 import { createMap, currentTheme, fitTo, flyTo, mapCenter, render as renderMap, replayCanvas, revealItinerary, setHover, setTheme } from "./map.js";
-import { loadMapData, saveMapData } from "./store.js";
+import { createMapData } from "./mapdata.js";
 import { overlay } from "./overlay.js";
+import { renderHeader, renderHoverTip, renderPanel, setStatus } from "./panel.js";
+import { planSummary } from "./plans.js";
 import { liveReplay } from "./replay.js";
-import { area, covers, fetchOsm } from "./overpass.js";
-import { esc, renderHeader, renderPanel } from "./panel.js";
-import * as state from "./state.js";
+import { TIERS, overTierLimit, tierAllows } from "./tiers.js";
 
-const STORAGE_KEY = "birdseye.event";
+const EVENT_KEY = "birdseye.event";
 const UNITS_KEY = "birdseye.units";
 const TIER_KEY = "birdseye.tier";
 const DEBUG_KEY = "birdseye.debug";
-
-function loadDebug() {
-  try {
-    return { ...state.debugDefaults(), ...JSON.parse(localStorage.getItem(DEBUG_KEY) ?? "{}") };
-  } catch {
-    return state.debugDefaults();
-  }
-}
 const DEFAULT_CENTER = { lat: 45.5231, lon: -122.6765 };
 const AUTOSAVE_DELAY_MS = 500;
 
 const engine = createEngine();
-const panel = document.getElementById("panel");
-// The ghost space left by a cleared plan goes once the user scrolls up.
-let lastScroll = 0;
-panel.addEventListener("scroll", () => {
-  if (ui.ghost && panel.scrollTop < lastScroll) {
-    ui.ghost = null;
-    panel.querySelector(".ghost")?.remove();
-  }
-  lastScroll = panel.scrollTop;
-});
 const ui = {
   tool: null,
   itinerary: null,
@@ -45,142 +51,143 @@ const ui = {
   status: "Draw a course to begin.",
   busy: false,
   beam: 64,
-  unit: state.UNITS[localStorage.getItem(UNITS_KEY)] ?? state.UNITS.km,
+  unit: UNITS[storedChoice(UNITS_KEY, UNITS, "km")],
   // A stand-in for a real account: what the tier allows is enforced, who pays is not.
-  tier: localStorage.getItem(TIER_KEY) in state.TIERS ? localStorage.getItem(TIER_KEY) : "free",
+  tier: storedChoice(TIER_KEY, TIERS, "free"),
   banner: null,
   debug: loadDebug(),
-  // Height of the last plan's results, kept as empty space after it is cleared.
-  ghost: null,
   // `null` while alternatives are still being explored; then the ones that beat the plan.
   alternatives: null,
 };
-let planGeneration = 0;
+let event = loadSaved() ?? newEvent(DEFAULT_CENTER);
+let autosave;
+/** The spot on a course the hover tip points at, so the tip rides along when the map moves. */
+let hoverAnchor = null;
 
-let event = loadSaved() ?? state.newEvent(DEFAULT_CENTER);
-const map = createMap("map", event.origin, onMapClick, onMapHover);
-const paint = overlay(map);
-const top = document.getElementById("top");
+const header = document.getElementById("top");
+const panel = document.getElementById("panel");
 const hoverTip = document.getElementById("hover");
 const mapStatus = document.getElementById("mapstatus");
 const scan = document.getElementById("scan");
-/** On phones the panel covers the map; planning closes it so the progress is visible. */
-const closePanelOnPhones = () => matchMedia("(max-width: 700px)").matches && document.body.classList.remove("panel-open");
-map.on("layers-ready", draw);
-map.once("layers-ready", restoreMapData);
+const map = createMap("map", event.origin, onMapClick, onMapHover);
+const overlayCanvas = overlay(map);
+const mapdata = createMapData({
+  engine,
+  ui,
+  currentEvent: () => event,
+  fallbackCenter: () => mapCenter(map),
+  narrate,
+  render,
+});
 
-/** After a reload the event comes back from localStorage; its map data comes back from IndexedDB. */
-async function restoreMapData() {
-  if (!hasCourse()) return;
-  const saved = await loadMapData();
-  if (saved && covers(saved.area, area(event))) {
-    ui.osm = saved.osm;
-    ui.osmArea = saved.area;
-    narrate(await buildNetwork());
-    draw();
-  } else {
-    scheduleMapData();
-  }
-}
-
-/** Frame the longest course, with a margin, whenever a new event arrives. */
-function showCourses() {
-  const longest = state.largestCourse(event);
-  if (longest) fitTo(map, longest.segments.flatMap((s) => s.points), ui.debug.fitMargin / 100);
-  else flyTo(map, event.origin);
-}
+map.on("layers-ready", render);
+map.once("layers-ready", () => mapdata.restore());
+map.on("move", placeHoverTip);
 window.birdseye = { map, event: () => event };
 
-let autosave;
-function draw() {
-  renderHeader(top, event, ui, actions);
-  renderPanel(panel, event, ui, actions);
-  mapStatus.textContent = ui.status;
-  mapStatus.hidden = !ui.status;
-  renderMap(map, event, ui.itinerary, ui.tool?.courseIndex ?? null);
-  clearTimeout(autosave);
-  autosave = setTimeout(() => localStorage.setItem(STORAGE_KEY, JSON.stringify(event)), AUTOSAVE_DELAY_MS);
+/** A preference chosen on an earlier visit, or `fallback` when it is missing or no longer offered. */
+function storedChoice(key, table, fallback) {
+  const stored = localStorage.getItem(key);
+  return stored in table ? stored : fallback;
+}
+
+function loadDebug() {
+  try {
+    return { ...debugDefaults(), ...JSON.parse(localStorage.getItem(DEBUG_KEY) ?? "{}") };
+  } catch {
+    return debugDefaults();
+  }
 }
 
 function loadSaved() {
   try {
-    const saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
-    return state.looksLikeEvent(saved) ? saved : null;
+    const saved = JSON.parse(localStorage.getItem(EVENT_KEY));
+    return looksLikeEvent(saved) ? saved : null;
   } catch {
     return null;
   }
 }
 
+function render() {
+  renderHeader(header, event, ui, actions);
+  renderPanel(panel, event, ui, actions);
+  mapStatus.textContent = ui.status;
+  mapStatus.hidden = !ui.status;
+  renderMap(map, event, ui.itinerary, ui.tool?.courseIndex ?? null);
+  clearTimeout(autosave);
+  autosave = setTimeout(() => localStorage.setItem(EVENT_KEY, JSON.stringify(event)), AUTOSAVE_DELAY_MS);
+}
+
+/** Status changes every frame during planning; rebuilding the whole panel that often would drop input focus. */
+function narrate(text) {
+  ui.status = text;
+  setStatus(panel, text);
+  mapStatus.textContent = text;
+}
+
 /** Apply an edit to the event; any plan, and any search for alternatives to it, is stale afterwards. */
 function mutate(edit) {
   edit();
-  state.reconcileProfiles(event);
+  reconcileProfiles(event);
   ui.itinerary = null;
-  planGeneration++;
-  draw();
-  scheduleMapData();
+  invalidatePlan();
+  render();
+  mapdata.schedule();
 }
 
-/**
- * The network depends on mode and speed; rebuild it from the cached map data rather than
- * refetching. Runs in the background (the worker serialises engine calls) so a change made
- * while something else is busy is never silently dropped.
- */
-const REBUILD_DELAY_MS = 400;
-let rebuildTimer = null;
-let networkBuild = null;
-
-function rebuildNetwork() {
-  ui.network = null;
-  if (!ui.osm) return;
-  narrate("Rebuilding network…");
-  // Spinner clicks arrive in bursts; build once they stop, and let Plan wait for that build.
-  clearTimeout(rebuildTimer);
-  networkBuild = new Promise((resolve) => {
-    rebuildTimer = setTimeout(() => {
-      buildNetwork()
-        .then(narrate)
-        .catch((err) => narrate(`Network: ${err.message}`))
-        .finally(resolve);
-    }, REBUILD_DELAY_MS);
-  });
+/** Applies `edit` only if the event still fits the tier afterwards; otherwise says why not. */
+function mutateWithinTier(edit) {
+  const trial = structuredClone(event);
+  edit(trial);
+  const why = overTierLimit(trial, ui.tier);
+  if (why) {
+    ui.status = `${why} — switch to ${TIERS.plus.label} for more.`;
+    render();
+    return false;
+  }
+  mutate(() => edit(event));
+  return true;
 }
 
-let mapDataTimer = null;
-let mapDataFetch = null;
-
-const hasCourse = () => event.courses.some((c) => c.segments.some((s) => s.points.length >= 2));
-
-/** Fetches map data for the courses in the background unless the extract in hand already covers them. */
-function ensureMapData() {
-  if (mapDataFetch || !hasCourse()) return mapDataFetch;
-  const needed = area(event);
-  if (covers(ui.osmArea, needed)) return null;
-  // The projection is centred on the courses so distances stay true across the whole event.
-  event.origin = state.courseCenter(event, mapCenter(map));
-  narrate("Fetching map data…");
-  mapDataFetch = (async () => {
-    try {
-      const osm = await fetchOsm(event);
-      ui.osm = osm;
-      ui.osmArea = needed;
-      ui.network = null;
-      saveMapData({ osm, area: needed });
-      narrate(await buildNetwork());
-    } catch (err) {
-      narrate(`Map data: ${err.message}`);
-    } finally {
-      mapDataFetch = null;
-      draw();
-    }
-  })();
-  return mapDataFetch;
+/** Run async work with the panel locked and its outcome in the status line. */
+async function run(label, work) {
+  if (ui.busy) return;
+  ui.busy = true;
+  ui.status = label;
+  render();
+  try {
+    await work();
+  } catch (err) {
+    ui.status = `Error: ${err.message}`;
+  } finally {
+    ui.busy = false;
+    render();
+  }
 }
 
-/** Courses change point by point while drawing; fetch once the pen has been still for a moment. */
-function scheduleMapData() {
-  clearTimeout(mapDataTimer);
-  mapDataTimer = setTimeout(() => ensureMapData(), ui.debug.mapDataDelayMs);
+/** Take on a freshly loaded event and whatever map data came with it. */
+async function adoptEvent(loaded, osm, loadedMessage) {
+  event = loaded;
+  ui.itinerary = null;
+  ui.alternatives = null;
+  showCourses();
+  ui.status = (await mapdata.adopt(osm)) ?? loadedMessage;
+}
+
+/** Frame the longest course, with a margin, whenever a new event arrives. */
+function showCourses() {
+  const longest = largestCourse(event);
+  if (longest) fitTo(map, longest.segments.flatMap((s) => s.points), ui.debug.fitMargin / 100);
+  else flyTo(map, event.origin);
+}
+
+/** On phones the panel covers the map; planning closes it so the progress is visible. */
+const closePanelOnPhones = () => matchMedia("(max-width: 700px)").matches && document.body.classList.remove("panel-open");
+
+function toggleTool(kind, courseIndex) {
+  const same = ui.tool?.kind === kind && ui.tool.courseIndex === courseIndex;
+  ui.tool = same ? null : { kind, courseIndex };
+  render();
 }
 
 function onMapClick(latlon, metresPerPixel) {
@@ -188,14 +195,14 @@ function onMapClick(latlon, metresPerPixel) {
   // With no tool active a tap is a hover: phones have no pointer to hover with.
   if (!tool) return onMapHover(latlon, metresPerPixel);
   mutate(() => {
-    if (tool.kind === "draw") state.addPoint(event.courses[tool.courseIndex], latlon);
+    if (tool.kind === "draw") addPoint(event.courses[tool.courseIndex], latlon);
     if (tool.kind === "start") event.spectator.start = latlon;
     if (tool.kind === "end") event.spectator.end = { location: latlon, latest: event.spectator.earliest + 4 * 3600 };
-    if (tool.kind === "region") state.addRegion(event, latlon);
+    if (tool.kind === "region") addRegion(event, latlon);
     if (tool.kind === "split") {
-      const hit = state.nearestOnCourses(event, latlon);
+      const hit = nearestOnCourses(event, latlon);
       if (hit && hit.courseIndex === tool.courseIndex) {
-        state.splitSegment(event.courses[hit.courseIndex], hit.segmentIndex, hit.pointIndex, hit.latlon);
+        splitSegment(event.courses[hit.courseIndex], hit.segmentIndex, hit.pointIndex, hit.latlon);
       }
     }
     if (tool.kind !== "draw") ui.tool = null;
@@ -204,22 +211,22 @@ function onMapClick(latlon, metresPerPixel) {
 
 /** Hovering a course marks the spot and lists when each racer on it should pass. */
 function onMapHover(latlon, metresPerPixel) {
-  const hits = latlon ? state.nearestOnEachCourse(event, latlon).filter((h) => h.metres <= ui.debug.hoverPx * metresPerPixel) : [];
+  const hits = latlon ? nearestOnEachCourse(event, latlon).filter((h) => h.metres <= ui.debug.hoverPx * metresPerPixel) : [];
   if (!hits.length) {
     hoverAnchor = null;
     setHover(map, null);
     hoverTip.hidden = true;
     return;
   }
-  const blocks = hits.map((hit) => {
-    const course = event.courses[hit.courseIndex];
-    const metres = state.distanceAlong(course, hit);
-    const rows = state.arrivalsAt(event, course, metres).map(
-      (a) => `<li><b>${esc(a.racer.name)}</b> ~${state.clock(a.expected)} <span class="muted">${state.clock(a.early)}–${state.clock(a.late)}</span></li>`,
-    );
-    return `<div>${esc(course.name)} · ${state.distanceLabel(metres, ui.unit, 1)}</div><ul>${rows.join("") || "<li class='muted'>no racers</li>"}</ul>`;
-  });
-  hoverTip.innerHTML = blocks.join("");
+  renderHoverTip(
+    hoverTip,
+    hits.map((hit) => {
+      const course = event.courses[hit.courseIndex];
+      const metres = distanceAlong(course, hit);
+      return { course, metres, arrivals: arrivalsAt(event, course, metres) };
+    }),
+    ui.unit,
+  );
   const nearest = hits.reduce((a, b) => (b.d2 < a.d2 ? b : a));
   hoverAnchor = nearest.latlon;
   placeHoverTip();
@@ -228,50 +235,17 @@ function onMapHover(latlon, metresPerPixel) {
 }
 
 /** The tip sits beside the spot on the course, so it rides along when the map pans or zooms. */
-let hoverAnchor = null;
 function placeHoverTip() {
   if (!hoverAnchor) return;
   const point = map.project([hoverAnchor.lon, hoverAnchor.lat]);
   hoverTip.style.left = `${point.x + 14}px`;
   hoverTip.style.top = `${point.y + 14}px`;
 }
-map.on("move", placeHoverTip);
 
-function toggleTool(kind, courseIndex) {
-  const same = ui.tool?.kind === kind && ui.tool.courseIndex === courseIndex;
-  ui.tool = same ? null : { kind, courseIndex };
-  draw();
-}
-
-/** Run async work with the panel locked and its outcome in the status line. */
-async function run(label, work) {
-  if (ui.busy) return;
-  ui.busy = true;
-  ui.status = label;
-  draw();
-  try {
-    await work();
-  } catch (err) {
-    ui.status = `Error: ${err.message}`;
-  } finally {
-    ui.busy = false;
-    draw();
-  }
-}
-
-/** Applies `edit` only if the event still fits the tier afterwards; otherwise says why not. */
-function mutateWithinTier(edit) {
-  const trial = structuredClone(event);
-  const probe = { event: trial };
-  edit(probe.event);
-  const why = state.overTierLimit(trial, ui.tier);
-  if (why) {
-    ui.status = `${why} — switch to Plus for more.`;
-    draw();
-    return false;
-  }
-  mutate(() => edit(event));
-  return true;
+function download(filename, text, type) {
+  const a = Object.assign(document.createElement("a"), { href: URL.createObjectURL(new Blob([text], { type })), download: filename });
+  a.click();
+  URL.revokeObjectURL(a.href);
 }
 
 const actions = {
@@ -279,30 +253,29 @@ const actions = {
     ui.tier = ui.tier === "free" ? "plus" : "free";
     localStorage.setItem(TIER_KEY, ui.tier);
     if (ui.tier === "plus") ui.banner = null;
-    draw();
+    render();
   },
   locked({ what }) {
-    const limit = { course: "one course", racer: "two racers", pace: "one pace per racer" }[what];
-    ui.banner = `Free includes ${limit}. Upgrade to Plus for more, or`;
-    draw();
+    ui.banner = `${TIERS[ui.tier].label} includes ${tierAllows(ui.tier, what)}. Upgrade to ${TIERS.plus.label} for more, or`;
+    render();
   },
   dismissBanner() {
     ui.banner = null;
-    draw();
+    render();
   },
   resetDebug() {
-    ui.debug = state.debugDefaults();
+    ui.debug = debugDefaults();
     localStorage.removeItem(DEBUG_KEY);
-    draw();
+    render();
   },
   addCourse() {
-    if (!mutateWithinTier((e) => state.addCourse(e))) return;
+    if (!mutateWithinTier((e) => addCourse(e))) return;
     ui.tool = { kind: "draw", courseIndex: event.courses.length - 1 };
-    draw();
+    render();
   },
   removeCourse({ ci }) {
     mutate(() => {
-      state.removeCourse(event, event.courses[ci]);
+      removeCourse(event, event.courses[ci]);
       ui.tool = null;
     });
   },
@@ -310,26 +283,26 @@ const actions = {
     toggleTool("draw", Number(ci));
   },
   undo({ ci }) {
-    mutate(() => state.undoPoint(event.courses[ci]));
+    mutate(() => undoPoint(event.courses[ci]));
   },
   split({ ci }) {
     toggleTool("split", Number(ci));
   },
   merge({ ci, si }) {
-    mutate(() => state.mergeWithNext(event.courses[ci], Number(si)));
+    mutate(() => mergeWithNext(event.courses[ci], Number(si)));
   },
   addRacer() {
-    mutateWithinTier((e) => state.addRacer(e, e.courses[0]));
+    mutateWithinTier((e) => addRacer(e, e.courses[0]));
   },
   removeRacer({ ri }) {
     mutate(() => event.racers.splice(Number(ri), 1));
   },
   splitInterval({ ri, ii }) {
     const interval = event.racers[ri].pace_profile[ii];
-    mutateWithinTier((e) => state.splitInterval(e.racers[ri], Number(ii), (interval.start_m + interval.end_m) / 2));
+    mutateWithinTier((e) => splitInterval(e.racers[ri], Number(ii), (interval.start_m + interval.end_m) / 2));
   },
   mergeInterval({ ri, ii }) {
-    mutate(() => state.mergeInterval(event.racers[ri], Number(ii)));
+    mutate(() => mergeInterval(event.racers[ri], Number(ii)));
   },
   setStart() {
     toggleTool("start");
@@ -350,15 +323,13 @@ const actions = {
     mutate(() => event.spectator.required_regions.splice(Number(gi), 1));
   },
   theme() {
-    const next = currentTheme() === "dark" ? "light" : "dark";
-    document.documentElement.dataset.theme = next;
-    setTheme(map, next);
+    setTheme(map, currentTheme() === "dark" ? "light" : "dark");
   },
   units() {
-    const next = ui.unit === state.UNITS.km ? "mi" : "km";
-    ui.unit = state.UNITS[next];
+    const next = ui.unit === UNITS.km ? "mi" : "km";
+    ui.unit = UNITS[next];
     localStorage.setItem(UNITS_KEY, next);
-    draw();
+    render();
   },
   flyTo({ stop }) {
     flyTo(map, ui.itinerary.stops[stop].location);
@@ -375,16 +346,8 @@ const actions = {
     await run("Loading…", async () => {
       const saved = JSON.parse(text);
       const loaded = saved.event ?? saved;
-      if (!state.looksLikeEvent(loaded)) throw new Error("not a .bird event file");
-      event = loaded;
-      ui.osm = saved.osm ?? null;
-      ui.osmArea = ui.osm ? area(event) : null;
-      saveMapData(ui.osm ? { osm: ui.osm, area: ui.osmArea } : null);
-      ui.network = null;
-      ui.itinerary = null;
-      showCourses();
-      ui.status = ui.osm ? await buildNetwork() : "Loaded.";
-      if (!ui.osm) scheduleMapData();
+      if (!looksLikeEvent(loaded)) throw new Error("not a .bird event file");
+      await adoptEvent(loaded, saved.osm, "Loaded.");
     });
   },
   async example(_, select) {
@@ -394,18 +357,10 @@ const actions = {
       const response = await fetch(`${import.meta.env.BASE_URL}examples/${name}.bird`);
       if (!response.ok) throw new Error(`example ${name} not found`);
       const saved = await response.json();
-      event = saved.event;
-      state.rebase(event, state.todayAt("09:00"));
+      rebase(saved.event, todayAt("09:00"));
       // Examples are demos: let them show what Plus allows.
-      if (state.overTierLimit(event, ui.tier)) actions.toggleTier();
-      ui.osm = saved.osm ?? null;
-      ui.osmArea = ui.osm ? area(event) : null;
-      saveMapData(ui.osm ? { osm: ui.osm, area: ui.osmArea } : null);
-      ui.network = null;
-      ui.itinerary = null;
-      showCourses();
-      ui.status = ui.osm ? await buildNetwork() : "Example loaded.";
-      if (!ui.osm) scheduleMapData();
+      if (overTierLimit(saved.event, ui.tier)) actions.toggleTier();
+      await adoptEvent(saved.event, saved.osm, "Example loaded.");
     });
   },
   async importCourses(_, input) {
@@ -414,8 +369,8 @@ const actions = {
     const bytes = await file.arrayBuffer();
     await run(`Reading ${file.name}…`, async () => {
       const courses = await engine.call("courses", { name: file.name, bytes });
-      const room = state.TIERS[ui.tier].courses - event.courses.length;
-      if (courses.length > room) throw new Error(`${file.name} has ${courses.length} courses; ${state.TIERS[ui.tier].label} allows ${state.TIERS[ui.tier].courses}`);
+      const room = TIERS[ui.tier].courses - event.courses.length;
+      if (courses.length > room) throw new Error(`${file.name} has ${courses.length} courses; ${TIERS[ui.tier].label} allows ${TIERS[ui.tier].courses}`);
       for (const course of courses) {
         course.start_time = event.spectator.earliest;
         event.courses.push(course);
@@ -424,19 +379,19 @@ const actions = {
       if (courses.length) showCourses();
       ui.status = `Imported ${courses.length} course(s).`;
     });
-    ensureMapData();
+    mapdata.ensure();
   },
   togglePanel() {
     document.body.classList.toggle("panel-open");
   },
   reset() {
     if (!confirm("Start over? This clears the courses, racers, settings, and fetched map data.")) return;
-    event = state.newEvent(mapCenter(map));
-    Object.assign(ui, { osm: null, osmArea: null, network: null, itinerary: null, alternatives: null, tool: null, banner: null, status: "Draw a course to begin." });
-    localStorage.removeItem(STORAGE_KEY);
-    saveMapData(null);
-    planGeneration++;
-    draw();
+    event = newEvent(mapCenter(map));
+    mapdata.clear();
+    Object.assign(ui, { itinerary: null, alternatives: null, tool: null, banner: null, status: "Draw a course to begin." });
+    localStorage.removeItem(EVENT_KEY);
+    invalidatePlan();
+    render();
   },
   async plan() {
     let planned = false;
@@ -446,38 +401,45 @@ const actions = {
     await run("Planning…", async () => {
       if (!event.courses.length) throw new Error("draw or import a course first");
       if (!event.racers.length) throw new Error("add a racer first");
-      const over = state.overTierLimit(event, ui.tier);
-      if (over) throw new Error(`${over} — switch to Plus to plan this event`);
+      const over = overTierLimit(event, ui.tier);
+      if (over) throw new Error(`${over} — switch to ${TIERS.plus.label} to plan this event`);
       // Map data is normally already in hand from the background fetch; otherwise wait for it.
-      clearTimeout(mapDataTimer);
-      await ensureMapData();
+      mapdata.cancelSchedule();
+      await mapdata.ensure();
       if (!ui.osm) throw new Error("map data could not be fetched; try again in a moment");
       // The previous itinerary fades out while the engine's progress plays, and the new one fades in after.
       revealItinerary(map, false);
       let itinerary;
       // A settings change mid-plan makes the result stale: drop it and plan again with the new settings.
       for (;;) {
-        const generation = planGeneration;
-        if (networkBuild) await networkBuild;
-        if (!ui.network) narrate(await buildNetwork());
+        const generation = planGeneration();
+        await mapdata.awaitRebuild();
+        if (!ui.network) narrate(await mapdata.buildNetwork());
         const problems = await engine.call("validate", { event });
         if (problems.length) throw new Error(problems.join("; "));
         const radius = event.spectator.sighting_radius_m;
-        const live = liveReplay({ ctx: replayCanvas(map), paint }, radius, narrate, () => (scan.hidden = true), ui.debug);
-        itinerary = await engine.call("plan", { event, options: { beam: ui.beam, trace: true } }, live.push);
-        await live.finish();
-        if (generation === planGeneration) break;
+        const live = liveReplay({ layers: replayCanvas(map), canvas: overlayCanvas }, radius, ui.debug, narrate, () => (scan.hidden = true));
+        try {
+          itinerary = await engine.call("plan", { event, options: { beam: ui.beam, trace: true } }, live.push);
+        } finally {
+          // However the plan ended, the replay owns an animation loop that has to be stopped.
+          await live.finish();
+        }
+        if (generation === planGeneration()) break;
         narrate("Settings changed — planning again…");
       }
       ui.itinerary = itinerary;
       ui.alternatives = null;
-      ui.status = `${state.planSummary(event, itinerary)}.`;
+      ui.status = `${planSummary(event, itinerary)}.`;
       planned = true;
-      draw();
+      render();
       requestAnimationFrame(() => revealItinerary(map, true));
     });
     scan.hidden = true;
-    if (planned) exploreAlternatives(++planGeneration).catch((err) => console.error("alternatives", err));
+    if (planned) {
+      const generation = invalidatePlan();
+      exploreAlternatives({ engine, event, ui, generation, render }).catch((err) => console.error("alternatives", err));
+    }
   },
   async useAlternative({ alt }) {
     const { variant, itinerary } = ui.alternatives[Number(alt)];
@@ -486,7 +448,7 @@ const actions = {
       ui.itinerary = itinerary;
       // Already loosened once; offering further loosening would chase diminishing returns.
       ui.alternatives = [];
-      ui.status = `${state.planSummary(event, itinerary)}. ${await buildNetwork()}`;
+      ui.status = `${planSummary(event, itinerary)}. ${await mapdata.buildNetwork()}`;
     });
   },
   edit({ field, ci, si, ri, ii, gi, key }, input) {
@@ -497,34 +459,40 @@ const actions = {
       localStorage.setItem(DEBUG_KEY, JSON.stringify(ui.debug));
       return;
     }
+    // How hard to search is not part of the event either, but the next plan must use it.
+    if (field === "beam") {
+      ui.beam = number;
+      invalidatePlan();
+      return;
+    }
     const course = event.courses[ci];
     const racer = event.racers[ri];
     const s = event.spectator;
     const edits = {
       name: () => (event.name = input.value),
       courseName: () => (course.name = input.value),
-      courseStart: () => (course.start_time = state.withClock(course.start_time, input.value)),
+      courseStart: () => (course.start_time = withClock(course.start_time, input.value)),
       segmentMode: () => (course.segments[si].mode = input.value),
       viewable: () => (course.segments[si].viewable = input.checked),
       racerName: () => (racer.name = input.value),
-      racerCourse: () => state.assignCourse(racer, event.courses.find((c) => c.id === input.value)),
+      racerCourse: () => assignCourse(racer, event.courses.find((c) => c.id === input.value)),
       racerOffset: () => (racer.start_offset_s = number * 60),
       racerPriority: () => (racer.priority = number),
       racerPrefer: () => (racer.prefer = input.value),
-      pace: () => (racer.pace_profile[ii].seconds_per_km = state.parsePace(input.value, ui.unit) ?? racer.pace_profile[ii].seconds_per_km),
+      pace: () => (racer.pace_profile[ii].seconds_per_km = parsePace(input.value, ui.unit) ?? racer.pace_profile[ii].seconds_per_km),
       uncertainty: () => (racer.pace_profile[ii].uncertainty = number / 100),
-      earliest: () => (s.earliest = state.withClock(s.earliest, input.value)),
-      latest: () => (s.latest = input.value ? state.laterThan(s.earliest, input.value) : null),
-      endLatest: () => (s.end.latest = state.withClock(s.end.latest, input.value)),
+      earliest: () => (s.earliest = withClock(s.earliest, input.value)),
+      latest: () => (s.latest = input.value ? laterThan(s.earliest, input.value) : null),
+      endLatest: () => (s.end.latest = withClock(s.end.latest, input.value)),
       regionRadius: () => (s.required_regions[gi].radius_m = number),
       travel: () => {
         s.mode = input.value;
         s.speed_mps = null;
-        rebuildNetwork();
+        mapdata.rebuildNetwork();
       },
       speed: () => {
         s.speed_mps = number > 0 ? number / ui.unit.speedPerMps : null;
-        rebuildNetwork();
+        mapdata.rebuildNetwork();
       },
       radius: () => (s.sighting_radius_m = number),
       skipStart: () => (s.skip_start_m = number / ui.unit.perMetre),
@@ -534,62 +502,7 @@ const actions = {
       decay: () => (s.objective.repeat_decay = number),
       requireFinishes: () => (s.objective.require_finishes = input.checked),
       courseClosed: () => (s.course_closed = input.checked),
-      beam: () => (ui.beam = number),
     };
-    mutate(() => edits[field]?.());
+    mutate(() => edits[field]());
   },
 };
-
-/** Tries looser settings after a plan and offers any that do clearly better; stops if a newer plan starts. */
-async function exploreAlternatives(generation) {
-  if (!ui.itinerary) return;
-  const snapshot = structuredClone(event);
-  const base = state.planLevels(snapshot, ui.itinerary);
-  const options = { beam: ui.beam, trace: false };
-  const found = [];
-  for (const alt of state.ALTERNATIVES) {
-    if (alt.when && !alt.when(snapshot.spectator)) continue;
-    const variant = state.alternativeEvent(snapshot, alt);
-    try {
-      // The network was built at the current speed; a faster variant scales its times instead of rebuilding.
-      const { itinerary } = await engine.call("plan", { event: variant, options: { ...options, speed_factor: alt.speedFactor } });
-      if (generation !== planGeneration) return;
-      if (state.betterPlan(state.planLevels(variant, itinerary), base)) found.push({ alt, variant, itinerary });
-    } catch {
-      // A variant that cannot be planned is simply not offered.
-    }
-  }
-  if (generation !== planGeneration) return;
-  ui.alternatives = found;
-  draw();
-}
-
-/** Status changes every frame during planning; rebuilding the whole panel that often would drop input focus. */
-function narrate(text) {
-  ui.status = text;
-  const status = panel.querySelector("[data-status]");
-  if (status) status.textContent = text;
-  mapStatus.textContent = text;
-}
-
-function download(filename, text, type) {
-  const a = Object.assign(document.createElement("a"), { href: URL.createObjectURL(new Blob([text], { type })), download: filename });
-  a.click();
-  URL.revokeObjectURL(a.href);
-}
-
-/**
- * Builds the network for the current settings. If the settings change while the engine is at
- * it, the result is stale: it is dropped and the build starts over.
- */
-async function buildNetwork() {
-  for (;;) {
-    const generation = planGeneration;
-    const { mode, speed_mps } = event.spectator;
-    const network = await engine.call("network", { osm: ui.osm, origin: event.origin, mode, speed: speed_mps });
-    if (generation === planGeneration) {
-      ui.network = network;
-      return `Network: ${network.nodes} nodes, ${network.edges} edges.`;
-    }
-  }
-}

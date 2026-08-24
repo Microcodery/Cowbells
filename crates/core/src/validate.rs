@@ -38,6 +38,8 @@ pub enum ValidationError {
     Speed,
     #[error("skipped start length must be zero or more")]
     SkipStart,
+    #[error("{setting} must be zero or more")]
+    Setting { setting: &'static str },
 }
 
 impl Event {
@@ -61,16 +63,35 @@ fn check_spectator(spectator: &SpectatorConfig, errors: &mut Vec<ValidationError
     if !(0.0..1.0).contains(&spectator.objective.repeat_decay) {
         errors.push(ValidationError::RepeatDecay);
     }
-    let ends = spectator.latest.into_iter().chain(spectator.end.map(|e| e.latest));
-    if ends.into_iter().any(|t| t < spectator.earliest) {
+    let mut ends = spectator.latest.into_iter().chain(spectator.end.map(|e| e.latest));
+    if ends.any(|t| t < spectator.earliest) {
         errors.push(ValidationError::DayWindow);
     }
-    if spectator.speed_mps.is_some_and(|s| !(s > 0.0 && s.is_finite())) {
+    if spectator.speed_mps.is_some_and(|s| !positive(s)) {
         errors.push(ValidationError::Speed);
     }
-    if !(spectator.skip_start_m >= 0.0 && spectator.skip_start_m.is_finite()) {
+    if !nonnegative(spectator.skip_start_m) {
         errors.push(ValidationError::SkipStart);
     }
+    let settings = [
+        (spectator.sighting_radius_m, "sighting radius"),
+        (spectator.viewpoint_spacing_m, "viewpoint spacing"),
+        (spectator.min_stop_s, "minimum stop"),
+        (spectator.safety_buffer_s, "safety buffer"),
+    ];
+    for (value, setting) in settings {
+        if !nonnegative(value) {
+            errors.push(ValidationError::Setting { setting });
+        }
+    }
+}
+
+fn positive(x: f64) -> bool {
+    x > 0.0 && x.is_finite()
+}
+
+fn nonnegative(x: f64) -> bool {
+    x >= 0.0 && x.is_finite()
 }
 
 fn check_unique<'a>(ids: impl Iterator<Item = &'a String>, errors: &mut Vec<ValidationError>) {
@@ -83,9 +104,9 @@ fn check_unique<'a>(ids: impl Iterator<Item = &'a String>, errors: &mut Vec<Vali
 }
 
 fn check_course(course: &Course, errors: &mut Vec<ValidationError>) {
-    let id = course.id.clone();
+    let id = &course.id;
     if course.segments.is_empty() {
-        errors.push(ValidationError::EmptyCourse { course: id });
+        errors.push(ValidationError::EmptyCourse { course: id.clone() });
         return;
     }
     for segment in &course.segments {
@@ -122,12 +143,15 @@ fn check_racer(
     projection: &Projection,
     errors: &mut Vec<ValidationError>,
 ) {
-    let id = racer.id.clone();
+    let id = &racer.id;
     let Some(course) = course else {
-        errors.push(ValidationError::UnknownCourse { racer: id, course: racer.course_id.clone() });
+        errors.push(ValidationError::UnknownCourse {
+            racer: id.clone(),
+            course: racer.course_id.clone(),
+        });
         return;
     };
-    if !(racer.priority >= 0.0 && racer.priority.is_finite()) {
+    if !nonnegative(racer.priority) {
         errors.push(ValidationError::Priority { racer: id.clone() });
     }
     let length = course.length(projection);
@@ -142,7 +166,7 @@ fn check_racer(
         errors.push(ValidationError::ProfileCoverage { racer: id.clone(), length });
     }
     for (index, interval) in racer.pace_profile.iter().enumerate() {
-        if !(interval.seconds_per_km > 0.0 && interval.seconds_per_km.is_finite()) {
+        if !positive(interval.seconds_per_km) {
             errors.push(ValidationError::NonPositivePace { racer: id.clone(), index });
         }
         if !(0.0..1.0).contains(&interval.uncertainty) {
@@ -266,13 +290,15 @@ mod tests {
         e.spectator.latest = Some(-1);
         e.spectator.speed_mps = Some(0.0);
         e.spectator.skip_start_m = -1.0;
+        e.spectator.min_stop_s = f64::NAN;
         assert_eq!(
             e.validate(),
             Err(vec![
                 ValidationError::RepeatDecay,
                 ValidationError::DayWindow,
                 ValidationError::Speed,
-                ValidationError::SkipStart
+                ValidationError::SkipStart,
+                ValidationError::Setting { setting: "minimum stop" },
             ])
         );
     }

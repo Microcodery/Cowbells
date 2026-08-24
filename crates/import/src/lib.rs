@@ -3,12 +3,12 @@
 
 use std::io::{Cursor, Read};
 
+use birdseye_core::{Course, LatLon, Mode, Segment};
 use quick_xml::Reader;
 use quick_xml::events::Event as Xml;
 use thiserror::Error;
 
-use crate::gpx::courses_from_gpx;
-use crate::model::{Course, LatLon, Mode, Segment};
+mod gpx;
 
 #[derive(Debug, Error)]
 pub enum ImportError {
@@ -20,12 +20,6 @@ pub enum ImportError {
     Malformed(String),
 }
 
-impl From<gpx::errors::GpxError> for ImportError {
-    fn from(e: gpx::errors::GpxError) -> Self {
-        ImportError::Malformed(e.to_string())
-    }
-}
-
 impl From<quick_xml::Error> for ImportError {
     fn from(e: quick_xml::Error) -> Self {
         ImportError::Malformed(e.to_string())
@@ -33,14 +27,26 @@ impl From<quick_xml::Error> for ImportError {
 }
 
 /// A named line of points, as found in a file before it becomes a course.
-type Line = (Option<String>, Vec<LatLon>);
+struct NamedLine {
+    name: Option<String>,
+    points: Vec<LatLon>,
+}
 
 /// Courses from a file, chosen by its extension.
 pub fn courses_from_file(name: &str, bytes: &[u8]) -> Result<Vec<Course>, ImportError> {
-    let extension = name.rsplit('.').next().unwrap_or_default().to_ascii_lowercase();
+    let extension = name.rsplit_once('.').map_or("", |(_, ext)| ext).to_ascii_lowercase();
     let text = || String::from_utf8_lossy(bytes);
     let lines = match extension.as_str() {
-        "gpx" => return nonempty(courses_from_gpx(&text())?),
+        // GPX keeps its track segments so recording gaps surface in validation.
+        "gpx" => {
+            let tracks = gpx::tracks(&text())?;
+            let courses = tracks
+                .into_iter()
+                .enumerate()
+                .map(|(i, (name, segments))| course("gpx", i, name, segments))
+                .collect();
+            return nonempty(courses);
+        }
         "kml" => kml_lines(&text())?,
         "kmz" => kml_lines(&unzip_kml(bytes)?)?,
         "tcx" => tcx_lines(&text())?,
@@ -51,9 +57,9 @@ pub fn courses_from_file(name: &str, bytes: &[u8]) -> Result<Vec<Course>, Import
     nonempty(
         lines
             .into_iter()
-            .filter(|(_, points)| points.len() >= 2)
+            .filter(|line| line.points.len() >= 2)
             .enumerate()
-            .map(|(i, (name, points))| course(&extension, i, name, points))
+            .map(|(i, line)| course(&extension, i, line.name, vec![line.points]))
             .collect(),
     )
 }
@@ -62,12 +68,22 @@ fn nonempty(courses: Vec<Course>) -> Result<Vec<Course>, ImportError> {
     if courses.is_empty() { Err(ImportError::Empty) } else { Ok(courses) }
 }
 
-fn course(kind: &str, index: usize, name: Option<String>, points: Vec<LatLon>) -> Course {
+fn course(kind: &str, index: usize, name: Option<String>, segments: Vec<Vec<LatLon>>) -> Course {
     let id = format!("{kind}-{index}");
+    let segments = segments
+        .into_iter()
+        .enumerate()
+        .map(|(j, points)| Segment {
+            id: format!("{id}-{j}"),
+            mode: Mode::Run,
+            points,
+            viewable: true,
+        })
+        .collect();
     Course {
         name: name.unwrap_or_else(|| format!("Course {}", index + 1)),
         start_time: 0,
-        segments: vec![Segment { id: format!("{id}-0"), mode: Mode::Run, points, viewable: true }],
+        segments,
         id,
     }
 }
@@ -88,7 +104,7 @@ fn unzip_kml(bytes: &[u8]) -> Result<String, ImportError> {
 }
 
 /// Every `LineString` or `gx:Track` in a KML, named after its Placemark.
-fn kml_lines(xml: &str) -> Result<Vec<Line>, ImportError> {
+fn kml_lines(xml: &str) -> Result<Vec<NamedLine>, ImportError> {
     let mut reader = Reader::from_str(xml);
     let mut path: Vec<String> = Vec::new();
     let mut lines = Vec::new();
@@ -99,8 +115,11 @@ fn kml_lines(xml: &str) -> Result<Vec<Line>, ImportError> {
             Xml::Start(e) => path.push(local_name(e.name().as_ref())),
             Xml::End(_) => {
                 let closed = path.pop();
-                if closed.as_deref() == Some("Track") && track.len() >= 2 {
-                    lines.push((placemark_name.clone(), std::mem::take(&mut track)));
+                if closed.as_deref() == Some("Track") {
+                    lines.push(NamedLine {
+                        name: placemark_name.clone(),
+                        points: std::mem::take(&mut track),
+                    });
                 }
                 if closed.as_deref() == Some("Placemark") {
                     placemark_name = None;
@@ -110,18 +129,18 @@ fn kml_lines(xml: &str) -> Result<Vec<Line>, ImportError> {
                 let text = t.unescape()?.trim().to_string();
                 let inside = |tag: &str| path.iter().any(|p| p == tag);
                 match path.last().map(String::as_str) {
-                    Some("name") if path.len() >= 2 && path[path.len() - 2] == "Placemark" => {
+                    Some("name") if path.iter().nth_back(1).is_some_and(|p| p == "Placemark") => {
                         placemark_name = Some(text);
                     }
                     Some("coordinates") if inside("LineString") => {
-                        let points: Vec<LatLon> = text
+                        let points = text
                             .split_whitespace()
                             .filter_map(|triple| {
                                 let mut parts = triple.split(',').map(str::parse::<f64>);
                                 Some(LatLon { lon: parts.next()?.ok()?, lat: parts.next()?.ok()? })
                             })
                             .collect();
-                        lines.push((placemark_name.clone(), points));
+                        lines.push(NamedLine { name: placemark_name.clone(), points });
                     }
                     Some("coord") if inside("Track") => {
                         let mut parts = text.split_whitespace().map(str::parse::<f64>);
@@ -140,7 +159,7 @@ fn kml_lines(xml: &str) -> Result<Vec<Line>, ImportError> {
 }
 
 /// Every `Track` (within a Course or an Activity Lap) in a TCX.
-fn tcx_lines(xml: &str) -> Result<Vec<Line>, ImportError> {
+fn tcx_lines(xml: &str) -> Result<Vec<NamedLine>, ImportError> {
     let mut reader = Reader::from_str(xml);
     let mut path: Vec<String> = Vec::new();
     let mut lines = Vec::new();
@@ -157,10 +176,10 @@ fn tcx_lines(xml: &str) -> Result<Vec<Line>, ImportError> {
                     }
                     point = (None, None);
                 }
-                Some("Track") if track.len() >= 2 => {
-                    lines.push((name.clone(), std::mem::take(&mut track)));
+                Some("Track") => {
+                    lines
+                        .push(NamedLine { name: name.clone(), points: std::mem::take(&mut track) });
                 }
-                Some("Track") => track.clear(),
                 _ => {}
             },
             Xml::Text(t) => {
@@ -180,7 +199,7 @@ fn tcx_lines(xml: &str) -> Result<Vec<Line>, ImportError> {
 }
 
 /// The record positions of a FIT activity or course, as one line.
-fn fit_lines(bytes: &[u8]) -> Result<Vec<Line>, ImportError> {
+fn fit_lines(bytes: &[u8]) -> Result<Vec<NamedLine>, ImportError> {
     let records =
         fitparser::from_bytes(bytes).map_err(|e| ImportError::Malformed(e.to_string()))?;
     let semicircles = |v: &fitparser::Value| match v {
@@ -197,11 +216,11 @@ fn fit_lines(bytes: &[u8]) -> Result<Vec<Line>, ImportError> {
             points.push(LatLon { lat, lon });
         }
     }
-    Ok(vec![(None, points)])
+    Ok(vec![NamedLine { name: None, points }])
 }
 
 /// Every LineString or MultiLineString in a GeoJSON geometry, feature, or collection.
-fn geojson_lines(bytes: &[u8]) -> Result<Vec<Line>, ImportError> {
+fn geojson_lines(bytes: &[u8]) -> Result<Vec<NamedLine>, ImportError> {
     let value: serde_json::Value =
         serde_json::from_slice(bytes).map_err(|e| ImportError::Malformed(e.to_string()))?;
     let mut lines = Vec::new();
@@ -209,7 +228,7 @@ fn geojson_lines(bytes: &[u8]) -> Result<Vec<Line>, ImportError> {
     Ok(lines)
 }
 
-fn collect_geojson(value: &serde_json::Value, name: Option<String>, out: &mut Vec<Line>) {
+fn collect_geojson(value: &serde_json::Value, name: Option<String>, out: &mut Vec<NamedLine>) {
     let latlon =
         |p: &serde_json::Value| Some(LatLon { lon: p.get(0)?.as_f64()?, lat: p.get(1)?.as_f64()? });
     let line = |coords: &serde_json::Value| -> Vec<LatLon> {
@@ -234,10 +253,12 @@ fn collect_geojson(value: &serde_json::Value, name: Option<String>, out: &mut Ve
                 collect_geojson(geometry, own_name.clone(), out);
             }
         }
-        Some("LineString") => out.push((own_name, line(&value["coordinates"]))),
+        Some("LineString") => {
+            out.push(NamedLine { name: own_name, points: line(&value["coordinates"]) })
+        }
         Some("MultiLineString") => {
             for coords in value["coordinates"].as_array().into_iter().flatten() {
-                out.push((own_name.clone(), line(coords)));
+                out.push(NamedLine { name: own_name.clone(), points: line(coords) });
             }
         }
         _ => {}
@@ -252,6 +273,8 @@ fn local_name(name: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const TWO_TRACKS: &str = include_str!("../tests/fixtures/two_tracks.gpx");
 
     const KML: &str = r#"<?xml version="1.0"?><kml xmlns="http://www.opengis.net/kml/2.2" xmlns:gx="http://www.google.com/kml/ext/2.2"><Document>
       <Placemark><name>Route For: Half</name><LineString><coordinates>-104.95,39.75,0 -104.94,39.751,0 -104.93,39.752,0</coordinates></LineString></Placemark>
@@ -271,6 +294,20 @@ mod tests {
 
     fn summary(courses: &[Course]) -> Vec<(String, usize)> {
         courses.iter().map(|c| (c.name.clone(), c.segments[0].points.len())).collect()
+    }
+
+    #[test]
+    fn gpx_gives_one_course_per_track_and_one_segment_per_trkseg() {
+        let courses = courses_from_file("morning.gpx", TWO_TRACKS.as_bytes()).unwrap();
+        let segments: Vec<_> = courses
+            .iter()
+            .map(|c| {
+                (c.name.as_str(), c.segments.iter().map(|s| s.points.len()).collect::<Vec<_>>())
+            })
+            .collect();
+        assert_eq!(segments, vec![("Morning 5K", vec![2, 1]), ("Evening Loop", vec![2])]);
+        assert_eq!(courses[0].segments[0].points[0], LatLon { lat: 45.0, lon: -122.0 });
+        assert_eq!(courses[0].segments[1].id, "gpx-0-1");
     }
 
     #[test]
@@ -322,12 +359,14 @@ mod tests {
     #[test]
     fn unknown_extensions_and_empty_files_are_errors() {
         assert!(matches!(courses_from_file("x.csv", b""), Err(ImportError::Unsupported(_))));
+        assert!(matches!(courses_from_file("nodotname", b""), Err(ImportError::Unsupported(_))));
         let empty = r#"{"type":"FeatureCollection","features":[]}"#;
         assert!(matches!(
             courses_from_file("x.geojson", empty.as_bytes()),
             Err(ImportError::Empty)
         ));
         assert!(courses_from_file("x.kml", b"<kml><Placemark>").is_err());
+        assert!(courses_from_file("x.gpx", b"<gpx><trk>").is_err());
     }
 
     /// A minimal FIT file: header, one record definition, two records, CRC.

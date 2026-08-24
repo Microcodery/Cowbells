@@ -9,6 +9,7 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 birdseye-core.workspace = true
+birdseye-import.workspace = true
 birdseye-plan.workspace = true
 birdseye-routing.workspace = true
 serde = { version = "1.0.229", features = ["derive"] }

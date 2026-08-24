@@ -10,7 +10,7 @@ use thiserror::Error;
 
 use crate::planner::{Options, Problem, Region, plan_with};
 use crate::trace::{LabelEvent, LegRouter, Progress, viewpoint_traces};
-use crate::viewpoints::{Kind, Viewpoint, add_sightings, cluster, raw_viewpoints_with};
+use crate::viewpoints::{Kind, Sighting, Viewpoint, add_sightings, cluster, raw_viewpoints_with};
 
 #[derive(Debug, Error)]
 pub enum SolveError {
@@ -102,17 +102,17 @@ pub fn solve_with(
         });
         Ok(all.len() - 1)
     };
-    let start = match spectator.start {
-        Some(latlon) => Some(anchor(latlon, SolveError::StartOffNetwork(SPECTATOR_SNAP_M))?),
-        None => None,
-    };
-    let end = match spectator.end {
-        Some(deadline) => Some((
-            anchor(deadline.location, SolveError::EndOffNetwork(SPECTATOR_SNAP_M))?,
-            deadline.latest as f64,
-        )),
-        None => None,
-    };
+    let start = spectator
+        .start
+        .map(|latlon| anchor(latlon, SolveError::StartOffNetwork(SPECTATOR_SNAP_M)))
+        .transpose()?;
+    let end = spectator
+        .end
+        .map(|deadline| {
+            let at = anchor(deadline.location, SolveError::EndOffNetwork(SPECTATOR_SNAP_M))?;
+            Ok((at, deadline.latest as f64))
+        })
+        .transpose()?;
 
     // Reported after anchoring so indices match the ones the search reports.
     if options.trace {
@@ -135,10 +135,13 @@ pub fn solve_with(
         .collect();
 
     let nodes: Vec<NodeId> = all.iter().map(|c| c.node).collect();
-    let routes = graph.routes(&nodes);
+    let mut routes = graph.routes(&nodes);
+    // The search wants only the sightings; `all` stays behind for geometry and rendering.
+    let sightings: Vec<Vec<Sighting>> =
+        all.iter_mut().map(|v| std::mem::take(&mut v.sightings)).collect();
     let problem = Problem {
-        travel: routes.times.clone(),
-        viewpoints: all,
+        travel: std::mem::take(&mut routes.times),
+        sightings,
         start,
         earliest: spectator.earliest as f64,
         latest: spectator.latest.map(|t| t as f64),
@@ -146,7 +149,7 @@ pub fn solve_with(
         min_stop: spectator.min_stop_s,
         priorities: event.racers.iter().map(|r| r.priority).collect(),
         prefer: event.racers.iter().map(|r| r.prefer).collect(),
-        objective: spectator.objective.clone(),
+        objective: spectator.objective,
         regions,
     };
     let mut router = LegRouter::default();
@@ -157,7 +160,7 @@ pub fn solve_with(
     let result = plan_with(&problem, options, &mut sink);
 
     let report = |viewpoint: usize, sighting: usize| {
-        let s = &problem.viewpoints[viewpoint].sightings[sighting];
+        let s = &problem.sightings[viewpoint][sighting];
         SightingReport {
             racer_id: event.racers[s.racer].id.clone(),
             kind: s.kind,
@@ -170,7 +173,7 @@ pub fn solve_with(
         .stops
         .iter()
         .map(|stop| StopReport {
-            location: projection.to_latlon(problem.viewpoints[stop.viewpoint].point),
+            location: projection.to_latlon(all[stop.viewpoint].point),
             arrive: stop.arrive,
             depart: stop.depart,
             seen: stop.sightings.iter().map(|&s| report(stop.viewpoint, s)).collect(),
@@ -180,7 +183,7 @@ pub fn solve_with(
         .stops
         .windows(2)
         .map(|pair| {
-            let to = problem.viewpoints[pair[1].viewpoint].node;
+            let to = all[pair[1].viewpoint].node;
             let path: Vec<Point> = routes.path(graph, pair[0].viewpoint, to).unwrap_or_default();
             Leg {
                 seconds: pair[1].arrive - pair[0].depart,
@@ -199,83 +202,9 @@ pub fn solve_with(
 
 #[cfg(test)]
 mod tests {
-    use birdseye_core::*;
-    use birdseye_routing::Graph;
-
     use super::*;
+    use crate::fixtures::{event, grid, latlon};
     use crate::trace::LabelEvent;
-    use crate::viewpoints::viewpoints;
-
-    const ORIGIN: LatLon = LatLon { lat: 45.0, lon: -122.0 };
-
-    /// 5×5 street grid, 100 m spacing, walked at 1 m/s; node (i, j) sits at (100 i, 100 j) metres.
-    fn grid() -> Graph {
-        let points =
-            (0..25).map(|n| Point::new(100.0 * (n % 5) as f64, 100.0 * (n / 5) as f64)).collect();
-        let mut graph = Graph::new(points);
-        for n in 0..25 {
-            if n % 5 < 4 {
-                graph.add_edge_both_ways(n, n + 1, 100.0);
-            }
-            if n / 5 < 4 {
-                graph.add_edge_both_ways(n, n + 5, 100.0);
-            }
-        }
-        graph
-    }
-
-    fn latlon(x: f64, y: f64) -> LatLon {
-        Projection::new(ORIGIN).to_latlon(Point::new(x, y))
-    }
-
-    /// One racer running west→east 10 m off the bottom row at 200 s per 100 m, spectator starting a block north.
-    fn event() -> Event {
-        Event {
-            name: "grid".into(),
-            origin: ORIGIN,
-            courses: vec![Course {
-                id: "c".into(),
-                name: "row".into(),
-                start_time: 0,
-                segments: vec![Segment {
-                    id: "s".into(),
-                    mode: Mode::Run,
-                    points: vec![latlon(0.0, 10.0), latlon(400.0, 10.0)],
-                    viewable: true,
-                }],
-            }],
-            racers: vec![Racer {
-                id: "alice".into(),
-                name: "Alice".into(),
-                course_id: "c".into(),
-                start_offset_s: 0.0,
-                pace_profile: vec![PaceInterval {
-                    start_m: 0.0,
-                    end_m: 400.0,
-                    seconds_per_km: 2000.0,
-                    uncertainty: 0.0,
-                }],
-                priority: 1.0,
-                prefer: Prefer::EnRoute,
-            }],
-            spectator: SpectatorConfig {
-                start: Some(latlon(0.0, 100.0)),
-                earliest: 0,
-                latest: None,
-                end: None,
-                mode: TravelMode::Walk,
-                speed_mps: None,
-                sighting_radius_m: 30.0,
-                skip_start_m: 0.0,
-                safety_buffer_s: 10.0,
-                min_stop_s: 0.0,
-                viewpoint_spacing_m: 50.0,
-                course_closed: false,
-                required_regions: vec![],
-                objective: Objective::default(),
-            },
-        }
-    }
 
     #[test]
     fn follows_the_racer_down_the_row_and_catches_the_finish() {
@@ -309,75 +238,6 @@ mod tests {
         );
         assert_eq!(itinerary.legs.len(), itinerary.stops.len() - 1);
         assert!(itinerary.legs.iter().all(|l| l.path.len() >= 2));
-    }
-
-    #[test]
-    fn densified_grid_offers_mid_block_viewpoints() {
-        let mut event = event();
-        event.spectator.viewpoint_spacing_m = 20.0;
-        let mut graph = grid();
-        let projection = Projection::new(ORIGIN);
-        let course: Vec<Point> = event.courses[0]
-            .polylines(&projection)
-            .iter()
-            .flat_map(|p| p.points().collect::<Vec<_>>())
-            .collect();
-        let corners_only = viewpoints(&event, &graph, &projection).len();
-        graph.densify_near(&course, 30.0, 25.0);
-        let all = viewpoints(&event, &graph, &projection);
-        assert!(all.len() > corners_only, "expected mid-block viewpoints, got {}", all.len());
-    }
-
-    #[test]
-    fn out_and_back_course_gives_two_passes_per_corner() {
-        let mut event = event();
-        event.courses[0].segments[0].points =
-            vec![latlon(0.0, 10.0), latlon(400.0, 10.0), latlon(0.0, 10.0)];
-        event.racers[0].pace_profile[0].end_m = 800.0;
-        event.racers[0].pace_profile[0].uncertainty = 0.3;
-        let projection = Projection::new(ORIGIN);
-        let all = viewpoints(&event, &grid(), &projection);
-        let corner = all.iter().find(|c| c.point == Point::new(200.0, 0.0)).unwrap();
-        assert_eq!(corner.sightings.len(), 2);
-        assert!(corner.sightings[0].expected < corner.sightings[1].expected);
-    }
-
-    #[test]
-    fn wide_spacing_merges_corners_but_keeps_the_finish() {
-        let mut event = event();
-        event.spectator.viewpoint_spacing_m = 120.0;
-        let all = viewpoints(&event, &grid(), &Projection::new(ORIGIN));
-        assert!(all.len() < 5, "got {}", all.len());
-        assert!(all.iter().any(|v| v.arcs.iter().any(|a| a.finish)));
-    }
-
-    #[test]
-    fn return_leg_on_the_next_street_survives_clustering() {
-        let mut event = event();
-        event.spectator.viewpoint_spacing_m = 120.0;
-        event.courses[0].segments[0].points =
-            vec![latlon(0.0, 10.0), latlon(400.0, 10.0), latlon(400.0, 90.0), latlon(0.0, 90.0)];
-        event.racers[0].pace_profile[0].end_m = 900.0;
-        let all = viewpoints(&event, &grid(), &Projection::new(ORIGIN));
-        let sees = |from: f64| all.iter().any(|v| v.arcs.iter().any(|a| a.start_m >= from));
-        assert!(sees(500.0) && all.iter().any(|v| v.arcs.iter().any(|a| a.end_m <= 400.0)));
-    }
-
-    #[test]
-    fn nodes_in_the_roadway_are_not_viewpoints() {
-        let mut event = event();
-        event.courses[0].segments[0].points = vec![latlon(0.0, 0.0), latlon(400.0, 0.0)];
-        let all = viewpoints(&event, &grid(), &Projection::new(ORIGIN));
-        assert!(all.is_empty(), "the course runs along the only row in sight");
-    }
-
-    #[test]
-    fn skipping_the_start_hides_its_stretch() {
-        let mut event = event();
-        event.spectator.skip_start_m = 150.0;
-        let all = viewpoints(&event, &grid(), &Projection::new(ORIGIN));
-        assert!(all.iter().all(|v| v.arcs.iter().all(|a| a.start_m >= 150.0)), "{all:?}");
-        assert!(!all.is_empty());
     }
 
     #[test]

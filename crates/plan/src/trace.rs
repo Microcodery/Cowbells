@@ -13,10 +13,11 @@ use crate::viewpoints::Viewpoint;
 const ARC_STEP_M: f64 = 10.0;
 /// The drawn network is thinned to this many nodes.
 pub const MAX_NETWORK_NODES: usize = 20_000;
+/// Every distinct leg the search tries, at most this many; the drawing shows them all.
+pub const MAX_LEGS: usize = 8_000;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ArcTrace {
-    pub course: usize,
     pub path: Vec<LatLon>,
 }
 
@@ -24,7 +25,6 @@ pub struct ArcTrace {
 pub struct ViewpointTrace {
     pub location: LatLon,
     pub arcs: Vec<ArcTrace>,
-    pub sightings: usize,
 }
 
 /// One decision in the label-setting search.
@@ -99,17 +99,12 @@ pub fn viewpoint_traces(
                 .arcs
                 .iter()
                 .map(|a| ArcTrace {
-                    course: a.course,
                     path: arc_path(&courses[a.course], a.start_m, a.end_m, projection),
                 })
                 .collect(),
-            sightings: v.sightings.len(),
         })
         .collect()
 }
-
-/// Every distinct leg the search tries, at most this many; the drawing shows them all.
-pub const MAX_LEGS: usize = 8_000;
 
 /// Routes each leg the search tries the first time it appears, from the shortest-path trees.
 #[derive(Default)]
@@ -165,7 +160,8 @@ fn arc_path(
                 }
                 along -= segment.length();
             }
-            projection.to_latlon(segments.last().expect("course has segments").point_at(f64::MAX))
+            let last = segments.last().expect("course has segments");
+            projection.to_latlon(last.point_at(last.length()))
         })
         .collect()
 }

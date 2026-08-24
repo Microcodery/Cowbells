@@ -4,7 +4,7 @@ import { Map as MapLibre, NavigationControl, setWorkerUrl } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { arrowLines, courseEnds, overlapChunks } from "./courselines.js";
 import { ICON_PREFIX, icons } from "./icons.js";
-import { stopLabel } from "./state.js";
+import { stopLabel } from "./plans.js";
 // MapLibre resolves its tile worker with a dynamic URL Vite cannot bundle; hand it a built one.
 import workerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url";
 
@@ -14,6 +14,12 @@ const STYLES = {
   light: "https://tiles.openfreemap.org/styles/positron",
   dark: "https://tiles.openfreemap.org/styles/dark",
 };
+
+const THEME_KEY = "birdseye.theme";
+// A theme chosen on an earlier visit is applied before the first paint; with none, the system's
+// preference stands and keeps following it.
+const storedTheme = localStorage.getItem(THEME_KEY);
+if (storedTheme in STYLES) document.documentElement.dataset.theme = storedTheme;
 
 const COURSE_COLORS = ["#4078f2", "#e45649", "#50a14f", "#c18401", "#0184bc", "#986801", "#e06c75", "#5c6370"];
 
@@ -54,6 +60,8 @@ export function createMap(container, center, onClick, onHover) {
 }
 
 export function setTheme(map, theme) {
+  localStorage.setItem(THEME_KEY, theme);
+  document.documentElement.dataset.theme = theme;
   map.setStyle(STYLES[theme]);
 }
 
@@ -156,8 +164,9 @@ function addLayers(map) {
 
 /** The dot marking the hovered spot on a course; `null` hides it. */
 export function setHover(map, latlon, courseIndex) {
+  if (!map.getSource("hover")) return;
   const features = latlon ? [feature(pointOf(latlon), { color: COURSE_COLORS[courseIndex % COURSE_COLORS.length] })] : [];
-  map.getSource("hover")?.setData(collection(features));
+  map.getSource("hover").setData(collection(features));
 }
 
 export function metresPerPixel(map) {
@@ -221,14 +230,16 @@ export function replayCanvas(map) {
     addLines(paths, color, width, opacity) {
       add("replay-lines", paths.filter((p) => p.length >= 2).map((p) => feature(lineOf(p), { color, width, opacity })));
     },
-    clear(...sources) {
-      for (const source of sources.length ? sources : Object.keys(layers)) {
+    clear() {
+      for (const source of Object.keys(layers)) {
         layers[source] = [];
         dirty.add(source);
       }
     },
     flush() {
-      for (const source of dirty) map.getSource(source)?.setData(collection(layers[source]));
+      // A style change tears the sources down mid-replay; what is queued waits for the new ones.
+      if (!map.getSource("replay-points")) return;
+      for (const source of dirty) map.getSource(source).setData(collection(layers[source]));
       dirty.clear();
     },
   };

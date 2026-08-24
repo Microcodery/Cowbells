@@ -5,14 +5,10 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-fitparser = "0.11.0"
-geo = { version = "0.33.1", default-features = false }
-gpx = "0.10.0"
-quick-xml = "0.37"
-serde = { version = "1.0.229", features = ["derive"] }
-serde_json = "1.0.151"
-thiserror = "2.0.20"
-zip = { version = "2", default-features = false, features = ["deflate"] }
+geo = { version = "0.33", default-features = false }
+serde = { version = "1.0", features = ["derive"] }
+thiserror = "2.0"
 
 [dev-dependencies]
-approx = "0.5.1"
+approx = "0.5"
+serde_json = "1.0"

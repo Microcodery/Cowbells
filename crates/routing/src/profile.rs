@@ -46,12 +46,9 @@ pub fn passage(mode: TravelMode, way: &Way, speed: f64) -> Option<Passage> {
     }
 }
 
-/// Speed across open ground for modes that may leave the road network.
-pub fn open_area_speed(mode: TravelMode, speed: f64) -> Option<f64> {
-    match mode {
-        TravelMode::Walk | TravelMode::Bike => Some(speed),
-        TravelMode::Drive => None,
-    }
+/// Whether the mode may leave the road network and cut across open ground.
+pub fn crosses_open_ground(mode: TravelMode) -> bool {
+    matches!(mode, TravelMode::Walk | TravelMode::Bike)
 }
 
 /// Parks, plazas, and similar areas a pedestrian or cyclist may cross freely.
@@ -178,30 +175,30 @@ mod tests {
 
     fn way(pairs: &[(&str, &str)]) -> Way {
         let tags: Tags = pairs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
-        Way { id: 1, nodes: vec![1, 2], tags }
+        Way { nodes: vec![1, 2], tags }
     }
 
-    fn walk(pairs: &[(&str, &str)]) -> Option<Passage> {
+    fn walking(pairs: &[(&str, &str)]) -> Option<Passage> {
         passage(TravelMode::Walk, &way(pairs), WALK_SPEED)
     }
-    fn bike(pairs: &[(&str, &str)]) -> Option<Passage> {
+    fn cycling(pairs: &[(&str, &str)]) -> Option<Passage> {
         passage(TravelMode::Bike, &way(pairs), BIKE_SPEED)
     }
-    fn drive(pairs: &[(&str, &str)]) -> Option<Passage> {
+    fn driving(pairs: &[(&str, &str)]) -> Option<Passage> {
         passage(TravelMode::Drive, &way(pairs), 0.0)
     }
 
     #[test]
     fn walking_uses_paths_and_streets_but_not_motorways() {
-        assert!(walk(&[("highway", "footway")]).is_some());
+        assert!(walking(&[("highway", "footway")]).is_some());
         assert_eq!(
-            walk(&[("highway", "primary"), ("oneway", "yes")]).unwrap().direction,
+            walking(&[("highway", "primary"), ("oneway", "yes")]).unwrap().direction,
             Direction::Both
         );
-        assert!(walk(&[("highway", "trunk")]).is_some());
-        assert!(walk(&[("highway", "motorway")]).is_none());
+        assert!(walking(&[("highway", "trunk")]).is_some());
+        assert!(walking(&[("highway", "motorway")]).is_none());
         assert_eq!(
-            walk(&[("highway", "steps")]).unwrap().metres_per_second,
+            walking(&[("highway", "steps")]).unwrap().metres_per_second,
             WALK_SPEED * STEPS_FACTOR
         );
         assert_eq!(
@@ -212,52 +209,54 @@ mod tests {
 
     #[test]
     fn access_tags_are_mode_specific() {
-        assert!(walk(&[("highway", "path"), ("foot", "no")]).is_none());
-        assert!(walk(&[("highway", "path"), ("foot", "private")]).is_none());
-        assert!(walk(&[("highway", "service"), ("access", "private")]).is_none());
-        assert!(walk(&[("highway", "service"), ("access", "private"), ("foot", "yes")]).is_some());
-        assert!(bike(&[("highway", "track"), ("vehicle", "no")]).is_none());
-        assert!(bike(&[("highway", "track"), ("vehicle", "no"), ("bicycle", "yes")]).is_some());
-        assert!(drive(&[("highway", "residential"), ("motor_vehicle", "no")]).is_none());
+        assert!(walking(&[("highway", "path"), ("foot", "no")]).is_none());
+        assert!(walking(&[("highway", "path"), ("foot", "private")]).is_none());
+        assert!(walking(&[("highway", "service"), ("access", "private")]).is_none());
+        assert!(
+            walking(&[("highway", "service"), ("access", "private"), ("foot", "yes")]).is_some()
+        );
+        assert!(cycling(&[("highway", "track"), ("vehicle", "no")]).is_none());
+        assert!(cycling(&[("highway", "track"), ("vehicle", "no"), ("bicycle", "yes")]).is_some());
+        assert!(driving(&[("highway", "residential"), ("motor_vehicle", "no")]).is_none());
     }
 
     #[test]
     fn cycling_respects_oneway_and_bicycle_tags() {
         assert_eq!(
-            bike(&[("highway", "residential"), ("oneway", "yes")]).unwrap().direction,
+            cycling(&[("highway", "residential"), ("oneway", "yes")]).unwrap().direction,
             Direction::Forward
         );
         assert_eq!(
-            bike(&[("highway", "residential"), ("oneway", "-1")]).unwrap().direction,
+            cycling(&[("highway", "residential"), ("oneway", "-1")]).unwrap().direction,
             Direction::Backward
         );
         assert_eq!(
-            bike(&[("highway", "residential"), ("oneway", "yes"), ("oneway:bicycle", "no")])
+            cycling(&[("highway", "residential"), ("oneway", "yes"), ("oneway:bicycle", "no")])
                 .unwrap()
                 .direction,
             Direction::Both
         );
-        assert!(bike(&[("highway", "footway")]).is_none());
-        assert!(bike(&[("highway", "footway"), ("bicycle", "yes")]).is_some());
+        assert!(cycling(&[("highway", "footway")]).is_none());
+        assert!(cycling(&[("highway", "footway"), ("bicycle", "yes")]).is_some());
         assert_eq!(
-            bike(&[("highway", "path"), ("bicycle", "dismount")]).unwrap().metres_per_second,
+            cycling(&[("highway", "path"), ("bicycle", "dismount")]).unwrap().metres_per_second,
             WALK_SPEED
         );
-        assert!(bike(&[("highway", "steps")]).is_none());
+        assert!(cycling(&[("highway", "steps")]).is_none());
     }
 
     #[test]
     fn driving_reads_maxspeed_and_roundabouts() {
-        let mps = |pairs: &[(&str, &str)]| drive(pairs).unwrap().metres_per_second;
+        let mps = |pairs: &[(&str, &str)]| driving(pairs).unwrap().metres_per_second;
         assert!((mps(&[("highway", "residential"), ("maxspeed", "20 mph")]) - 8.94).abs() < 0.01);
         assert!((mps(&[("highway", "residential"), ("maxspeed", "50 km/h")]) - 13.89).abs() < 0.01);
         assert!((mps(&[("highway", "living_street"), ("maxspeed", "walk")]) - 1.94).abs() < 0.01);
         assert!((mps(&[("highway", "primary")]) - 16.67).abs() < 0.01);
         assert_eq!(
-            drive(&[("highway", "primary"), ("junction", "roundabout")]).unwrap().direction,
+            driving(&[("highway", "primary"), ("junction", "roundabout")]).unwrap().direction,
             Direction::Forward
         );
-        assert!(drive(&[("highway", "footway")]).is_none());
+        assert!(driving(&[("highway", "footway")]).is_none());
     }
 
     #[test]

@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/core", "crates/routing", "crates/plan", "crates/wasm"]
+members = ["crates/core", "crates/import", "crates/routing", "crates/plan", "crates/wasm"]
 
 [workspace.package]
 version = "0.1.0"
@@ -9,6 +9,7 @@ license = "AGPL-3.0-only"
 
 [workspace.dependencies]
 birdseye-core = { path = "crates/core" }
+birdseye-import = { path = "crates/import" }
 birdseye-routing = { path = "crates/routing" }
 birdseye-plan = { path = "crates/plan" }
 

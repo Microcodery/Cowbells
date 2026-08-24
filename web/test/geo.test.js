@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { UNITS, courseCenter, newEvent, paceLabel, parsePace } from "../src/state.js";
+import { newEvent } from "../src/event.js";
+import { arrivalsAt, courseCenter, distanceAlong, largestCourse, nearestOnCourses } from "../src/geo.js";
 
 describe("hovering a course", () => {
-  it("measures distance along it and predicts each racer's arrival", async () => {
-    const { arrivalsAt, distanceAlong, nearestOnCourses } = await import("../src/state.js");
+  it("measures distance along it and predicts each racer's arrival", () => {
     const event = newEvent({ lat: 0, lon: 0 });
     const course = {
       id: "c",
@@ -27,8 +27,7 @@ describe("hovering a course", () => {
 });
 
 describe("largestCourse", () => {
-  it("picks the longest course and null when nothing is drawn", async () => {
-    const { largestCourse } = await import("../src/state.js");
+  it("picks the longest course and null when nothing is drawn", () => {
     const event = newEvent({ lat: 0, lon: 0 });
     expect(largestCourse(event)).toBeNull();
     event.courses.push(
@@ -36,15 +35,6 @@ describe("largestCourse", () => {
       { id: "b", segments: [{ points: [{ lat: 0, lon: 0 }, { lat: 0, lon: 0.03 }] }] },
     );
     expect(largestCourse(event).id).toBe("b");
-  });
-});
-
-describe("pace in display units", () => {
-  it("round-trips per mile and per kilometre", () => {
-    expect(paceLabel(360)).toBe("6:00");
-    expect(paceLabel(360, UNITS.mi)).toBe("9:39");
-    expect(parsePace("9:39", UNITS.mi)).toBeCloseTo(359.7, 0);
-    expect(parsePace("6", UNITS.km)).toBe(360);
   });
 });
 

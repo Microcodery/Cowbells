@@ -9,7 +9,6 @@ pub type Tags = HashMap<String, String>;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Way {
-    pub id: i64,
     pub nodes: Vec<i64>,
     #[serde(default)]
     pub tags: Tags,
@@ -71,7 +70,7 @@ impl Osm {
 mod tests {
     use super::*;
 
-    pub const FIXTURE: &str = include_str!("../tests/fixtures/small.json");
+    const FIXTURE: &str = include_str!("../tests/fixtures/small.json");
 
     #[test]
     fn parses_nodes_and_ways_and_ignores_relations() {

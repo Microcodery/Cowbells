@@ -46,11 +46,20 @@ name = "birdseye-core"
 version = "0.1.0"
 dependencies = [
  "approx",
- "fitparser",
  "geo",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+]
+
+[[package]]
+name = "birdseye-import"
+version = "0.1.0"
+dependencies = [
+ "birdseye-core",
+ "fitparser",
  "gpx",
  "quick-xml",
- "serde",
  "serde_json",
  "thiserror 2.0.20",
  "zip",
@@ -60,7 +69,6 @@ dependencies = [
 name = "birdseye-plan"
 version = "0.1.0"
 dependencies = [
- "approx",
  "birdseye-core",
  "birdseye-routing",
  "fixedbitset",
@@ -87,6 +95,7 @@ name = "birdseye-wasm"
 version = "0.1.0"
 dependencies = [
  "birdseye-core",
+ "birdseye-import",
  "birdseye-plan",
  "birdseye-routing",
  "js-sys",

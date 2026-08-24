@@ -1,23 +1,16 @@
 //! wasm-bindgen facade over the birdseye engine. Everything crosses as JSON strings.
 
-use birdseye_core::geom::{Point, Projection};
+use birdseye_core::geom::Projection;
 use birdseye_core::{Event, TravelMode};
-use birdseye_plan::trace::network_trace;
-use birdseye_plan::{Options, Progress};
+use birdseye_plan::{Options, Progress, network_trace, prepare_graph};
 use birdseye_routing::profile::default_speed;
 use birdseye_routing::{Graph, Osm, TravelTime};
 use serde::Deserialize;
 use wasm_bindgen::prelude::*;
 
-/// Spectator edges this close to a course are split so viewpoints can sit mid-block.
-const DENSIFY_SPACING_M: f64 = 20.0;
-/// Edges with both ends this close to a course run along it; sidewalks mapped as their own
-/// ways sit 3–6 m out and stay walkable.
-const ROADWAY_M: f64 = 3.0;
-
 #[wasm_bindgen]
-pub fn ping(msg: &str) -> String {
-    format!("birdseye {}: {msg}", birdseye_core::VERSION)
+pub fn version() -> String {
+    birdseye_core::VERSION.into()
 }
 
 /// Validation errors for an event JSON document, as a JSON array of strings (empty when valid).
@@ -35,7 +28,7 @@ pub fn validate(event_json: &str) -> Result<String, JsError> {
 /// file name's extension, as JSON.
 #[wasm_bindgen]
 pub fn parse_courses(file_name: &str, bytes: &[u8]) -> Result<String, JsError> {
-    let courses = birdseye_core::import::courses_from_file(file_name, bytes)
+    let courses = birdseye_import::courses_from_file(file_name, bytes)
         .map_err(|e| JsError::new(&e.to_string()))?;
     Ok(serde_json::to_string(&courses)?)
 }
@@ -60,7 +53,7 @@ impl Network {
     ) -> Result<Network, JsError> {
         let osm = Osm::parse(osm_json)?;
         let origin = serde_json::from_str(origin_json)?;
-        let mode: TravelMode = serde_json::from_str(&format!("\"{mode}\""))?;
+        let mode: TravelMode = mode.parse().map_err(|e: String| JsError::new(&e))?;
         let speed = speed_mps.unwrap_or_else(|| default_speed(mode));
         let graph = Graph::build(&osm, &Projection::new(origin), mode, speed);
         Ok(Network { graph, mode })
@@ -83,7 +76,7 @@ impl Network {
         on_progress: &js_sys::Function,
     ) -> Result<String, JsError> {
         let mut report = |progress: Progress| {
-            let json = serde_json::to_string(&progress).unwrap_or_default();
+            let json = serde_json::to_string(&progress).expect("progress serializes");
             let _ = on_progress.call1(&JsValue::NULL, &JsValue::from_str(&json));
         };
         self.plan_with(event_json, options_json, &mut report).map_err(|e| JsError::new(&e))
@@ -111,28 +104,12 @@ impl Network {
         if options.trace {
             progress(Progress::Network { points: network_trace(&self.graph, &projection) });
         }
-        let courses: Vec<_> = event.courses.iter().flat_map(|c| c.polylines(&projection)).collect();
-        let course_points: Vec<Point> = courses.iter().flat_map(samples_along).collect();
-        let mut graph = self.graph.clone();
-        // Scale before densifying so the split edges inherit the scaled times.
-        if let Some(factor) = options.speed_factor.filter(|f| *f > 0.0 && f.is_finite()) {
-            graph.scale_speed(factor);
-        }
-        graph.densify_near(&course_points, event.spectator.sighting_radius_m, DENSIFY_SPACING_M);
-        graph.clear_roadways(&courses, ROADWAY_M);
-        if event.spectator.course_closed {
-            graph.close_courses(&courses);
-        }
-        let options = Options { beam: options.beam, trace: options.trace };
-        let itinerary = birdseye_plan::solve_with(&event, &graph, options, progress)
+        let graph = prepare_graph(&self.graph, &event, &projection, options.speed_factor);
+        let solver_options = Options { beam: options.beam, trace: options.trace };
+        let itinerary = birdseye_plan::solve_with(&event, &graph, solver_options, progress)
             .map_err(|e| e.to_string())?;
         serde_json::to_string(&itinerary).map_err(|e| e.to_string())
     }
-}
-
-fn samples_along(polyline: &birdseye_core::geom::Polyline) -> Vec<Point> {
-    let steps = (polyline.length() / DENSIFY_SPACING_M).ceil().max(1.0) as usize;
-    (0..=steps).map(|i| polyline.point_at(i as f64 * DENSIFY_SPACING_M)).collect()
 }
 
 #[derive(Deserialize)]
@@ -153,8 +130,8 @@ fn default_beam() -> usize {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn ping_format() {
-        assert_eq!(super::ping("x"), format!("birdseye {}: x", birdseye_core::VERSION));
+    fn version_matches_the_crate() {
+        assert_eq!(super::version(), birdseye_core::VERSION);
     }
 
     #[test]

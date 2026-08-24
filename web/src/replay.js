@@ -4,10 +4,9 @@
 //   candidates – spots within sight brighten while the rest fade      (candidatesMs)
 //   merge      – candidates slide into their viewpoint, whose sighting circle and arc grow (mergeMs)
 //   search     – the search plays out with the best plan lit along the roads (≥ searchMs)
-// The first three stages draw on a canvas overlay (`paint`), which can redraw thousands of dots
-// every frame; the search draws through MapLibre (`ctx`), where a few hundred shapes a frame is fine.
+// The first three stages draw on a 2D `canvas` overlay, which can redraw thousands of dots every
+// frame; the search draws through MapLibre `layers`, where a few hundred shapes a frame is fine.
 
-const DEFAULT_MS = { network: 1000, candidates: 1000, merge: 1000, search: 3000 };
 /** Candidates animated in the merge; more than this is thinned for frame rate. */
 const MAX_MERGING = 4000;
 const RECENT_REACHED = 40;
@@ -26,28 +25,35 @@ const clamp01 = (t) => Math.min(1, Math.max(0, t));
 const key = (p) => `${p.lat.toFixed(6)},${p.lon.toFixed(6)}`;
 
 /**
- * Feed progress messages with `push`; they are animated onto the `paint` overlay and the map's
- * `ctx` with `timings` (ms per stage). `onFirstDraw` fires when the first report lands.
+ * Feed progress messages with `push`; they are animated onto the `canvas` overlay and the map's
+ * `layers` with `timings` (ms per stage). `onFirstDraw` fires once, when the first report lands.
  * `finish()` resolves once the last stage has played.
  */
-export function liveReplay({ ctx, paint }, radius, onStatus, onFirstDraw = () => {}, timings = {}) {
+export function liveReplay({ layers, canvas }, radius, timings, onStatus, onFirstDraw = () => {}) {
   const ms = {
-    network: timings.networkMs ?? DEFAULT_MS.network,
-    candidates: timings.candidatesMs ?? DEFAULT_MS.candidates,
-    merge: timings.mergeMs ?? DEFAULT_MS.merge,
-    search: timings.searchMs ?? DEFAULT_MS.search,
+    network: timings.networkMs,
+    candidates: timings.candidatesMs,
+    merge: timings.mergeMs,
+    search: timings.searchMs,
   };
   const data = { network: null, candidates: [], viewpoints: null, search: [] };
   let finished = false;
+  let drawn = false;
   let resolveDone;
   const done = new Promise((r) => (resolveDone = r));
-  const search = searchState(ctx, radius);
+  const search = searchState(layers, radius);
   let stage = null;
   let stageStart = 0;
   let others = [];
+  /** The candidate count `others` was last computed against. */
+  let othersAt = -1;
   let merging = null;
   let lastStatus = "";
-  const status = (text) => text !== lastStatus && onStatus((lastStatus = text));
+  const status = (text) => {
+    if (text === lastStatus) return;
+    lastStatus = text;
+    onStatus(text);
+  };
 
   /** Runs once when a stage begins and prepares what its frames draw. */
   const enter = (now, next) => {
@@ -59,53 +65,57 @@ export function liveReplay({ ctx, paint }, radius, onStatus, onFirstDraw = () =>
       merging = mergePlan(data.candidates, data.viewpoints);
       status(`Clustered to ${data.viewpoints.length} viewpoints, each covering a stretch of course`);
     } else if (next === "search") {
-      paint.clear();
+      canvas.clear();
     }
   };
 
-  /** The next stage starts when its data is in and the current one has run its time. */
+  /**
+   * The next stage starts when its data is in and the current one has run its time. Once the plan
+   * has finished, a stage with nothing to show plays anyway, so the funnel always reaches the end.
+   */
   const step = (now) => {
     const elapsed = now - stageStart;
-    if (stage === null && data.network) enter(now, "network");
-    else if (stage === "network" && elapsed >= ms.network && data.candidates.length) enter(now, "candidates");
-    else if (stage === "candidates" && elapsed >= ms.candidates && data.viewpoints) enter(now, "merge");
-    else if (stage === "merge" && elapsed >= ms.merge && (data.search.length || finished)) enter(now, "search");
+    const ready = (arrived) => finished || Boolean(arrived);
+    if (stage === null && ready(data.network)) enter(now, "network");
+    else if (stage === "network" && elapsed >= ms.network && ready(data.candidates.length)) enter(now, "candidates");
+    else if (stage === "candidates" && elapsed >= ms.candidates && ready(data.viewpoints)) enter(now, "merge");
+    else if (stage === "merge" && elapsed >= ms.merge && ready(data.search.length)) enter(now, "search");
   };
 
   const draw = (now) => {
     const p = clamp01((now - stageStart) / ms[stage]);
     if (stage === "network") {
-      paint.clear();
-      paint.dots("network", data.network, NETWORK_COLOR, 2, 0.8, 0, Math.ceil(data.network.length * ease(p)));
+      canvas.clear();
+      canvas.dots("network", data.network, NETWORK_COLOR, 2, 0.8, Math.ceil(data.network.length * ease(p)));
     } else if (stage === "candidates") {
       // Chunks keep arriving during the stage; the unlit set follows them.
-      if (others.count !== data.candidates.length) {
+      if (othersAt !== data.candidates.length) {
         const lit = new Set(data.candidates.map(key));
         others = data.network.filter((p) => !lit.has(key(p)));
-        others.count = data.candidates.length;
+        othersAt = data.candidates.length;
         status(`${data.candidates.length} spots within sighting distance of the course`);
       }
-      paint.clear();
-      paint.dots(`others:${others.count}`, others, NETWORK_COLOR, 2, 0.8 * (1 - ease(p)));
-      paint.dots(`candidates:${data.candidates.length}`, data.candidates, CANDIDATE_COLOR, 3, 0.2 + 0.6 * ease(p));
+      canvas.clear();
+      canvas.dots(`others:${othersAt}`, others, NETWORK_COLOR, 2, 0.8 * (1 - ease(p)));
+      canvas.dots(`candidates:${data.candidates.length}`, data.candidates, CANDIDATE_COLOR, 3, 0.2 + 0.6 * ease(p));
     } else if (stage === "merge") {
       // Candidates slide home, then each viewpoint's sighting range sweeps open like a radar.
       const slide = ease(clamp01(p / 0.6));
       const sweep = clamp01((p - 0.45) / 0.55);
-      paint.clear();
-      paint.slidingDots("merge", merging.from, merging.to, slide, CANDIDATE_COLOR, 3, 0.8 * (1 - sweep));
+      canvas.clear();
+      canvas.slidingDots("merge", merging.from, merging.to, slide, CANDIDATE_COLOR, 3, 0.8 * (1 - sweep));
       if (sweep > 0) {
-        paint.sectors("viewpoints", merging.centres, VIEWPOINT_COLOR, radius, 0.35, 2 * Math.PI * sweep);
-        paint.lines("arcs", merging.arcs, VIEWPOINT_COLOR, 4, 0.7 * sweep);
+        canvas.sectors("viewpoints", merging.centres, VIEWPOINT_COLOR, radius, 0.35, 2 * Math.PI * sweep);
+        canvas.lines("arcs", merging.arcs, VIEWPOINT_COLOR, 4, 0.7 * sweep);
       }
     } else if (stage === "search") {
       // Play the events that have arrived in proportion to the stage's time, one by one, so a
       // fast engine still unfolds over the whole stage and a slow one is shown as it comes.
       const target = Math.ceil(data.search.length * p);
       while (search.count < target && data.search.length > search.count) search.absorb(data.search[search.count], data.viewpoints);
-      ctx.clear();
+      layers.clear();
       search.draw(data.viewpoints);
-      ctx.flush();
+      layers.flush();
       status(`Searching… ${search.count} decisions · bright yellow = best plan so far`);
     }
   };
@@ -122,7 +132,10 @@ export function liveReplay({ ctx, paint }, radius, onStatus, onFirstDraw = () =>
 
   return {
     push(progress) {
-      if (stage === null && !data.network) onFirstDraw();
+      if (!drawn) {
+        drawn = true;
+        onFirstDraw();
+      }
       if (progress.stage === "network") data.network = progress.points;
       else if (progress.stage === "candidates") data.candidates = data.candidates.concat(progress.locations);
       else if (progress.stage === "viewpoints") data.viewpoints = progress.viewpoints;
@@ -137,9 +150,9 @@ export function liveReplay({ ctx, paint }, radius, onStatus, onFirstDraw = () =>
       if (!data.network) data.network = [];
       if (!data.viewpoints) data.viewpoints = [];
       return done.then(() => {
-        paint.clear();
-        ctx.clear();
-        ctx.flush();
+        canvas.clear();
+        layers.clear();
+        layers.flush();
       });
     },
   };
@@ -163,7 +176,7 @@ function mergePlan(candidates, viewpoints) {
 }
 
 /** The search as drawn: visited viewpoints, the ones just reached, rejections, and the best chain. */
-function searchState(ctx, radius) {
+function searchState(layers, radius) {
   const legPath = new Map();
   const alive = new Map();
   const visited = new Set();
@@ -171,13 +184,13 @@ function searchState(ctx, radius) {
   const tried = [];
   const rejected = [];
   let best = { score: -Infinity, chain: [] };
-  const state = {
+  const search = {
     count: 0,
     legs(legs) {
       for (const l of legs) legPath.set(`${l.from}>${l.to}`, l.path);
     },
     absorb(e, viewpoints) {
-      state.count++;
+      search.count++;
       const parentChain = e.parent == null ? [] : (alive.get(e.parent)?.chain ?? []);
       if (e.kind === "kept") {
         const entry = { label: e.label, score: e.score, chain: parentChain.concat([e.viewpoint]) };
@@ -204,14 +217,14 @@ function searchState(ctx, radius) {
       const leg = (from, to) => legPath.get(`${from}>${to}`) ?? [at(from), at(to)];
       const onBest = new Set(best.chain);
       const justReached = new Set(recent);
-      ctx.addCircles(viewpoints.filter((_, i) => !visited.has(i)).map((v) => v.location), VIEWPOINT_COLOR, radius, 0.15);
-      ctx.addCircles([...visited].filter((i) => !onBest.has(i) && !justReached.has(i)).map(at), VIEWPOINT_COLOR, radius, 0.4);
-      ctx.addCircles([...justReached].filter((i) => !onBest.has(i)).map(at), CANDIDATE_COLOR, radius, 0.7);
-      ctx.addPoints(rejected, REJECT_COLOR, 5);
-      ctx.addLines([...new Set(tried)].map((pair) => legPath.get(pair) ?? leg(...pair.split(">").map(Number))), TRIED_COLOR, 1.5, 0.12);
-      ctx.addLines(best.chain.slice(1).map((to, k) => leg(best.chain[k], to)), BEST_COLOR, 5, 1);
-      ctx.addCircles(best.chain.map(at), BEST_COLOR, radius, 0.8);
+      layers.addCircles(viewpoints.filter((_, i) => !visited.has(i)).map((v) => v.location), VIEWPOINT_COLOR, radius, 0.15);
+      layers.addCircles([...visited].filter((i) => !onBest.has(i) && !justReached.has(i)).map(at), VIEWPOINT_COLOR, radius, 0.4);
+      layers.addCircles([...justReached].filter((i) => !onBest.has(i)).map(at), CANDIDATE_COLOR, radius, 0.7);
+      layers.addPoints(rejected, REJECT_COLOR, 5);
+      layers.addLines([...new Set(tried)].map((pair) => leg(...pair.split(">").map(Number))), TRIED_COLOR, 1.5, 0.12);
+      layers.addLines(best.chain.slice(1).map((to, k) => leg(best.chain[k], to)), BEST_COLOR, 5, 1);
+      layers.addCircles(best.chain.map(at), BEST_COLOR, radius, 0.8);
     },
   };
-  return state;
+  return search;
 }

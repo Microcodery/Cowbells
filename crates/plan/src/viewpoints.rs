@@ -15,6 +15,8 @@ const SAMPLE_SPACING_M: f64 = 20.0;
 /// sidewalk node hugging the course sees it best, but is often reachable only via the nearest
 /// mapped crossing, so the corner spot it would displace in clustering makes the better stop.
 const CLEARANCE_M: f64 = 6.0;
+/// Candidates are reported to `found` in chunks of this many as they turn up.
+const CANDIDATE_CHUNK: usize = 400;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -66,26 +68,14 @@ pub fn viewpoints(
     graph: &impl TravelTime,
     projection: &Projection,
 ) -> Vec<Viewpoint> {
-    let mut kept =
-        cluster(raw_viewpoints(event, graph, projection), event.spectator.viewpoint_spacing_m);
+    let raw = raw_viewpoints_with(event, graph, projection, &mut |_| {});
+    let mut kept = cluster(raw, event.spectator.viewpoint_spacing_m);
     add_sightings(&mut kept, event);
     kept
 }
 
 /// Every network node within sighting radius of a course but not in its roadway, with its
-/// coverage arcs; not yet clustered.
-pub fn raw_viewpoints(
-    event: &Event,
-    graph: &impl TravelTime,
-    projection: &Projection,
-) -> Vec<Viewpoint> {
-    raw_viewpoints_with(event, graph, projection, &mut |_| {})
-}
-
-/// Candidates are reported to `found` in chunks as they turn up.
-const CANDIDATE_CHUNK: usize = 400;
-
-/// `raw_viewpoints`, calling `found` with each chunk of candidates as the network is scanned.
+/// coverage arcs and not yet clustered, calling `found` with each chunk as the network is scanned.
 pub fn raw_viewpoints_with(
     event: &Event,
     graph: &impl TravelTime,
@@ -195,21 +185,14 @@ fn sample_courses(event: &Event, projection: &Projection) -> (Vec<CourseSample>,
 /// Group visible samples per course into contiguous runs along the course.
 fn arcs(mut seen: Vec<(&CourseSample, f64)>) -> Vec<Arc> {
     seen.sort_by(|a, b| a.0.course.cmp(&b.0.course).then(a.0.distance.total_cmp(&b.0.distance)));
-    let mut runs: Vec<Vec<&(&CourseSample, f64)>> = Vec::new();
-    for entry in &seen {
-        let continues = runs.last().and_then(|run| run.last()).is_some_and(|prev| {
-            prev.0.course == entry.0.course
-                && entry.0.distance - prev.0.distance <= 1.5 * SAMPLE_SPACING_M
-        });
-        if !continues {
-            runs.push(Vec::new());
-        }
-        runs.last_mut().expect("just pushed").push(entry);
-    }
-    runs.iter().map(|run| arc_of(run)).collect()
+    seen.chunk_by(|a, b| {
+        a.0.course == b.0.course && b.0.distance - a.0.distance <= 1.5 * SAMPLE_SPACING_M
+    })
+    .map(arc_of)
+    .collect()
 }
 
-fn arc_of(run: &[&(&CourseSample, f64)]) -> Arc {
+fn arc_of(run: &[(&CourseSample, f64)]) -> Arc {
     let (first, last) = (run[0].0, run[run.len() - 1].0);
     Arc {
         course: first.course,
@@ -250,4 +233,79 @@ fn same_stretch(kept: &Arc, arc: &Arc, spacing: f64) -> bool {
         && (kept.finish || !arc.finish)
         && kept.start_m <= arc.end_m + spacing
         && arc.start_m <= kept.end_m + spacing
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::fixtures::{ORIGIN, event, grid, latlon};
+
+    #[test]
+    fn densified_grid_offers_mid_block_viewpoints() {
+        let mut event = event();
+        event.spectator.viewpoint_spacing_m = 20.0;
+        let mut graph = grid();
+        let projection = Projection::new(ORIGIN);
+        let course: Vec<Point> = event.courses[0]
+            .polylines(&projection)
+            .iter()
+            .flat_map(|p| p.points().collect::<Vec<_>>())
+            .collect();
+        let corners_only = viewpoints(&event, &graph, &projection).len();
+        graph.densify_near(&course, 30.0, 25.0);
+        let all = viewpoints(&event, &graph, &projection);
+        assert!(all.len() > corners_only, "expected mid-block viewpoints, got {}", all.len());
+    }
+
+    #[test]
+    fn out_and_back_course_gives_two_passes_per_corner() {
+        let mut event = event();
+        event.courses[0].segments[0].points =
+            vec![latlon(0.0, 10.0), latlon(400.0, 10.0), latlon(0.0, 10.0)];
+        event.racers[0].pace_profile[0].end_m = 800.0;
+        event.racers[0].pace_profile[0].uncertainty = 0.3;
+        let projection = Projection::new(ORIGIN);
+        let all = viewpoints(&event, &grid(), &projection);
+        let corner = all.iter().find(|c| c.point == Point::new(200.0, 0.0)).unwrap();
+        assert_eq!(corner.sightings.len(), 2);
+        assert!(corner.sightings[0].expected < corner.sightings[1].expected);
+    }
+
+    #[test]
+    fn wide_spacing_merges_corners_but_keeps_the_finish() {
+        let mut event = event();
+        event.spectator.viewpoint_spacing_m = 120.0;
+        let all = viewpoints(&event, &grid(), &Projection::new(ORIGIN));
+        assert!(all.len() < 5, "got {}", all.len());
+        assert!(all.iter().any(|v| v.arcs.iter().any(|a| a.finish)));
+    }
+
+    #[test]
+    fn return_leg_on_the_next_street_survives_clustering() {
+        let mut event = event();
+        event.spectator.viewpoint_spacing_m = 120.0;
+        event.courses[0].segments[0].points =
+            vec![latlon(0.0, 10.0), latlon(400.0, 10.0), latlon(400.0, 90.0), latlon(0.0, 90.0)];
+        event.racers[0].pace_profile[0].end_m = 900.0;
+        let all = viewpoints(&event, &grid(), &Projection::new(ORIGIN));
+        let sees = |from: f64| all.iter().any(|v| v.arcs.iter().any(|a| a.start_m >= from));
+        assert!(sees(500.0) && all.iter().any(|v| v.arcs.iter().any(|a| a.end_m <= 400.0)));
+    }
+
+    #[test]
+    fn nodes_in_the_roadway_are_not_viewpoints() {
+        let mut event = event();
+        event.courses[0].segments[0].points = vec![latlon(0.0, 0.0), latlon(400.0, 0.0)];
+        let all = viewpoints(&event, &grid(), &Projection::new(ORIGIN));
+        assert!(all.is_empty(), "the course runs along the only row in sight");
+    }
+
+    #[test]
+    fn skipping_the_start_hides_its_stretch() {
+        let mut event = event();
+        event.spectator.skip_start_m = 150.0;
+        let all = viewpoints(&event, &grid(), &Projection::new(ORIGIN));
+        assert!(all.iter().all(|v| v.arcs.iter().all(|a| a.start_m >= 150.0)), "{all:?}");
+        assert!(!all.is_empty());
+    }
 }

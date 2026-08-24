@@ -1,28 +1,45 @@
-// The side panel: renders the event as forms and turns edits into state changes.
+// The header and side panel: the event drawn as forms, and every control wired to an action.
 
-import * as state from "./state.js";
+import { DEBUG_DEFAULTS } from "./debug.js";
+import { DEFAULT_SPEED_MPS } from "./event.js";
+import { clock, distanceLabel, paceLabel, speedLabel } from "./format.js";
+import { courseLength, polylineLength } from "./geo.js";
+import { planSummary, stopLabel } from "./plans.js";
+import { TIERS, tierLocks, tierSummary } from "./tiers.js";
 
 const MODES = ["run", "bike", "swim", "other"];
 const TRAVEL = ["walk", "bike", "drive"];
+
+/** Per-root state that outlives a render, with the listeners that maintain it. */
+const panels = new WeakMap();
+
+function panelState(root) {
+  let state = panels.get(root);
+  if (!state) {
+    state = { editingTime: false, pendingRender: null };
+    panels.set(root, state);
+    trackTimeEditing(root, state);
+    trackGhostDismissal(root);
+  }
+  return state;
+}
 
 /**
  * `actions` is the set of callbacks the app wires up; `ui` is transient editor state
  * (which tool is active, the latest itinerary, status text).
  */
 export function renderPanel(root, event, ui, actions) {
+  const state = panelState(root);
   // A time input fires change after each segment typed; rebuilding it mid-entry would eat the rest, so wait for blur.
-  if (root.editingTime) {
-    root.pendingRender = () => renderPanel(root, event, ui, actions);
+  if (state.editingTime) {
+    state.pendingRender = () => renderPanel(root, event, ui, actions);
     return;
   }
   // Rebuilding the markup must not move the user: keep open sections open and the scroll where it was.
   const folds = new Map([...root.querySelectorAll("details[data-section]")].map((d) => [d.dataset.section, d.open]));
   const scroll = root.scrollTop;
   const focused = root.contains(document.activeElement) ? selectorFor(document.activeElement) : null;
-  // When the plan goes away, its space stays until the user scrolls up, so the panel does not snap.
-  const shown = root.querySelector("[data-results]");
-  if (shown && !ui.itinerary) ui.ghost = shown.offsetHeight;
-  if (ui.itinerary) ui.ghost = null;
+  measureGhost(root, ui.itinerary);
   root.innerHTML = `
     ${ui.banner ? `<div class="banner">${ui.banner} <a href="${RELEASES}" target="_blank" rel="noopener">Run it yourself</a> <button data-act="dismissBanner" title="Dismiss">✕</button></div>` : ""}
     <section>
@@ -50,7 +67,7 @@ export function renderPanel(root, event, ui, actions) {
     <section>
       <h2>Results</h2>
       <p class="muted"><span data-status>${esc(ui.status)}</span></p>
-      ${ui.itinerary ? `<div data-results>${results(ui.itinerary, event, ui)}</div>` : ui.ghost ? `<div class="ghost" style="height:${ui.ghost}px"></div>` : ""}
+      ${ui.itinerary ? `<div data-results>${results(ui.itinerary, event, ui)}</div>` : ghost()}
     </section>`;
   for (const details of root.querySelectorAll("details[data-section]")) {
     if (folds.has(details.dataset.section)) details.open = folds.get(details.dataset.section);
@@ -68,12 +85,33 @@ export function renderHeader(root, event, ui, actions) {
     <h1>birdseye</h1>
     <button data-act="plan" class="plan ${ready ? "ready" : "missing"}" ${ui.busy ? "disabled" : ""} title="${why}">Plan</button>
     <span class="row">
-      <button data-act="toggleTier" class="tier ${ui.tier}" title="Free: one course, two racers, one pace each. Plus: no limits.">${state.TIERS[ui.tier].label}</button>
+      <button data-act="toggleTier" class="tier ${ui.tier}" title="${tierSummary()}">${TIERS[ui.tier].label}</button>
       <button data-act="theme" title="Light or dark">◐</button>
       <button data-act="units" title="Switch units">${ui.unit.label}</button>
       <button data-act="togglePanel" class="phone-only" title="Options">☰</button>
     </span>`;
   bindActions(root, actions);
+}
+
+/** The status line alone, for the many updates a full render would be too heavy for. */
+export function setStatus(root, text) {
+  const status = root.querySelector("[data-status]");
+  if (status) status.textContent = text;
+}
+
+/**
+ * The tip beside a hovered spot on the courses: each `{ course, metres, arrivals }` the caller
+ * found there, with when every racer on that course is due.
+ */
+export function renderHoverTip(root, hovered, unit) {
+  root.innerHTML = hovered
+    .map(({ course, metres, arrivals }) => {
+      const rows = arrivals
+        .map((a) => `<li><b>${esc(a.racer.name)}</b> ~${clock(a.expected)} <span class="muted">${clock(a.early)}–${clock(a.late)}</span></li>`)
+        .join("");
+      return `<div>${esc(course.name)} · ${distanceLabel(metres, unit, 1)}</div><ul>${rows || "<li class='muted'>no racers</li>"}</ul>`;
+    })
+    .join("");
 }
 
 /** Clicks and changes inside `root` dispatch to `actions` by their `data-act` / `data-field`. */
@@ -90,27 +128,50 @@ function bindActions(root, actions) {
     if (act) actions[act](e.target.dataset, e.target);
     else if (field) actions.edit(e.target.dataset, e.target);
   };
-  if (root.focusTracked) return;
-  root.focusTracked = true;
-  // Chromium reports no active element between a time input's segments, so focus is tracked by its events.
+}
+
+/** Chromium reports no active element between a time input's segments, so focus is tracked by its events. */
+function trackTimeEditing(root, state) {
   root.addEventListener("focusin", (e) => {
-    root.editingTime = e.target.type === "time";
+    state.editingTime = e.target.type === "time";
   });
   root.addEventListener("focusout", (e) => {
     if (e.target.type !== "time") return;
-    root.editingTime = false;
-    const render = root.pendingRender;
-    root.pendingRender = null;
-    render?.();
+    state.editingTime = false;
+    const deferred = state.pendingRender;
+    state.pendingRender = null;
+    deferred?.();
+  });
+}
+
+// When the plan goes away, its space stays until the user scrolls up, so the panel does not snap.
+let ghostHeight = null;
+
+function measureGhost(root, itinerary) {
+  const shown = root.querySelector("[data-results]");
+  if (itinerary) ghostHeight = null;
+  else if (shown) ghostHeight = shown.offsetHeight;
+}
+
+const ghost = () => (ghostHeight ? `<div class="ghost" style="height:${ghostHeight}px"></div>` : "");
+
+function trackGhostDismissal(root) {
+  let lastScroll = 0;
+  root.addEventListener("scroll", () => {
+    if (ghostHeight && root.scrollTop < lastScroll) {
+      ghostHeight = null;
+      root.querySelector(".ghost")?.remove();
+    }
+    lastScroll = root.scrollTop;
   });
 }
 
 function coursesSection(event, ui) {
   const tool = (kind, index) => ui.tool?.kind === kind && ui.tool.courseIndex === index;
   return `<details class="section" data-section="courses">
-    <summary><h2>Courses ${addButton("addCourse", state.tierLocks(event, ui.tier).course, "course")}</h2></summary>
+    <summary><h2>Courses ${addButton("addCourse", tierLocks(event, ui.tier).courses, "courses")}</h2></summary>
     <div class="row">
-      ${state.tierLocks(event, ui.tier).course ? addButton("importCourses", true, "course", "Import") : `<label class="button" title="Import courses from GPX, KML, KMZ, TCX, FIT, or GeoJSON">Import<input type="file" accept=".gpx,.kml,.kmz,.tcx,.fit,.geojson,.json" data-act="importCourses" hidden ${ui.busy ? "disabled" : ""}></label>`}
+      ${tierLocks(event, ui.tier).courses ? addButton("importCourses", true, "courses", "Import") : `<label class="button" title="Import courses from GPX, KML, KMZ, TCX, FIT, or GeoJSON">Import<input type="file" accept=".gpx,.kml,.kmz,.tcx,.fit,.geojson,.json" data-act="importCourses" hidden ${ui.busy ? "disabled" : ""}></label>`}
       <span class="muted">GPX, KML, KMZ, TCX, FIT, GeoJSON</span>
     </div>
     ${event.courses
@@ -121,8 +182,8 @@ function coursesSection(event, ui) {
         <button data-act="removeCourse" data-ci="${ci}" title="Remove course" aria-label="Remove course">${TRASH}</button>
       </div>
       <div class="fields">
-        <label>starts <input type="time" data-field="courseStart" data-ci="${ci}" value="${state.clock(course.start_time)}"></label>
-        <label>length <span class="muted">${state.distanceLabel(state.courseLength(course), ui.unit)}</span></label>
+        <label>starts <input type="time" data-field="courseStart" data-ci="${ci}" value="${clock(course.start_time)}"></label>
+        <label>length <span class="muted">${distanceLabel(courseLength(course), ui.unit)}</span></label>
       </div>
       <div class="row">
         ${toolButton("draw", tool("draw", ci), "Draw", "Drawing… (click map)", `data-ci="${ci}"`)}
@@ -150,58 +211,75 @@ function coursesSection(event, ui) {
 function racersSection(event, ui) {
   if (event.courses.length === 0) return "";
   return `<details class="section" data-section="racers">
-    <summary><h2>Racers ${addButton("addRacer", state.tierLocks(event, ui.tier).racer, "racer")}</h2></summary>
-    ${event.racers
-      .map(
-        (racer, ri) => `<details class="card" data-section="racer-${racer.id}" open>
-      <summary><b>${esc(racer.name)}</b> <span class="muted">${esc(event.courses.find((c) => c.id === racer.course_id)?.name ?? "")} · ${state.paceLabel(racer.pace_profile[0]?.seconds_per_km ?? 0, ui.unit)}/${ui.unit.label}</span></summary>
-      <div class="row">
-        <input data-field="racerName" data-ri="${ri}" value="${esc(racer.name)}" aria-label="Racer name">
-        <button data-act="removeRacer" data-ri="${ri}" title="Remove racer" aria-label="Remove racer">${TRASH}</button>
-      </div>
-      <div class="fields">
-        <label>course <select data-field="racerCourse" data-ri="${ri}">${event.courses.map((c) => `<option value="${c.id}" ${c.id === racer.course_id ? "selected" : ""}>${esc(c.name)}</option>`).join("")}</select></label>
-        ${
-          racer.pace_profile.length === 1
-            ? `<label>pace <span><input data-field="pace" data-ri="${ri}" data-ii="0" value="${state.paceLabel(racer.pace_profile[0].seconds_per_km, ui.unit)}" size="5" title="min:sec per ${ui.unit.label}" aria-label="Pace"> /${ui.unit.label}</span></label>`
-            : `<label>pace <span class="muted">${racer.pace_profile.length} intervals ${GEAR}</span></label>`
-        }
-      </div>
-      ${advanced(
-        `racer-${racer.id}-adv`,
-        `<div class="fields">
-        <label>start offset <span><input type="number" data-field="racerOffset" data-ri="${ri}" value="${racer.start_offset_s / 60}" step="1" size="4"> min</span></label>
-        <label>priority <input type="number" data-field="racerPriority" data-ri="${ri}" value="${racer.priority}" step="0.5" min="0" size="3"></label>
-        <label>prefer <select data-field="racerPrefer" data-ri="${ri}" title="which sighting of this racer matters most">
-          ${options(["finish", "neutral", "en_route"], racer.prefer ?? "finish", { finish: "the finish", neutral: "during, then finish", en_route: "during, always" })}
-        </select></label>
-      </div>
-      ${
-        racer.pace_profile.length === 1
-          ? `<div class="row">
-        <label>&plusmn; <input type="number" data-field="uncertainty" data-ri="${ri}" data-ii="0" value="${Math.round(racer.pace_profile[0].uncertainty * 100)}" min="0" max="99" size="2" aria-label="Pace uncertainty">%</label>
-        ${state.tierLocks(event, ui.tier).pace(racer) ? addButton("splitInterval", true, "pace", "Split pace") : `<button data-act="splitInterval" data-ri="${ri}" data-ii="0" title="Split into two intervals at half distance">Split pace</button>`}
-      </div>`
-          : `<div class="paces">
-        ${racer.pace_profile
-          .map(
-            (p, ii) => `<div class="row">
-          <span class="muted">${(p.start_m * ui.unit.perMetre).toFixed(1)}&ndash;${state.distanceLabel(p.end_m, ui.unit, 1)}</span>
-          <input data-field="pace" data-ri="${ri}" data-ii="${ii}" value="${state.paceLabel(p.seconds_per_km, ui.unit)}" size="5" title="min:sec per ${ui.unit.label}" aria-label="Pace">
-          &plusmn; <input type="number" data-field="uncertainty" data-ri="${ri}" data-ii="${ii}" value="${Math.round(p.uncertainty * 100)}" min="0" max="99" size="2" aria-label="Pace uncertainty">%
-          ${state.tierLocks(event, ui.tier).pace(racer) ? addButton("splitInterval", true, "pace", "\u22ef") : `<button data-act="splitInterval" data-ri="${ri}" data-ii="${ii}" title="Split this interval in half">\u22ef</button>`}
-          ${ii + 1 < racer.pace_profile.length ? `<button data-act="mergeInterval" data-ri="${ri}" data-ii="${ii}" title="Merge with next">merge \u2193</button>` : ""}
-        </div>`,
-          )
-          .join("")}
-      </div>`
-      }`,
-      )}
-    </details>`,
-      )
-      .join("")}
+    <summary><h2>Racers ${addButton("addRacer", tierLocks(event, ui.tier).racers, "racers")}</h2></summary>
+    ${event.racers.map((racer, ri) => racerCard(racer, ri, event, ui)).join("")}
   </details>`;
 }
+
+/** A racer folded down to name, course, and pace, with the rest behind the gear. */
+function racerCard(racer, ri, event, ui) {
+  const course = event.courses.find((c) => c.id === racer.course_id)?.name ?? "";
+  return `<details class="card" data-section="racer-${racer.id}" open>
+    <summary><b>${esc(racer.name)}</b> <span class="muted">${esc(course)} · ${paceLabel(racer.pace_profile[0]?.seconds_per_km ?? 0, ui.unit)}/${ui.unit.label}</span></summary>
+    <div class="row">
+      <input data-field="racerName" data-ri="${ri}" value="${esc(racer.name)}" aria-label="Racer name">
+      <button data-act="removeRacer" data-ri="${ri}" title="Remove racer" aria-label="Remove racer">${TRASH}</button>
+    </div>
+    <div class="fields">
+      <label>course <select data-field="racerCourse" data-ri="${ri}">${event.courses.map((c) => `<option value="${c.id}" ${c.id === racer.course_id ? "selected" : ""}>${esc(c.name)}</option>`).join("")}</select></label>
+      ${paceField(racer, ri, ui)}
+    </div>
+    ${advanced(`racer-${racer.id}-adv`, racerAdvanced(racer, ri, event, ui))}
+  </details>`;
+}
+
+/** The one pace a racer holds throughout, or a note that their profile has intervals. */
+function paceField(racer, ri, ui) {
+  if (racer.pace_profile.length !== 1) return `<label>pace <span class="muted">${racer.pace_profile.length} intervals ${GEAR}</span></label>`;
+  return `<label>pace <span>${paceInput(racer, ri, 0, ui)} /${ui.unit.label}</span></label>`;
+}
+
+/** How the racer runs: when they start, how much they matter, and their pace profile in full. */
+function racerAdvanced(racer, ri, event, ui) {
+  const locked = tierLocks(event, ui.tier).paces(racer);
+  const profile =
+    racer.pace_profile.length === 1
+      ? `<div class="row">
+        <label>&plusmn; ${spreadInput(racer, ri, 0)}%</label>
+        ${splitPaceButton(ri, 0, locked, "Split pace", "Split into two intervals at half distance")}
+      </div>`
+      : `<div class="paces">${racer.pace_profile.map((_, ii) => paceRow(racer, ri, ii, locked, ui)).join("")}</div>`;
+  return `<div class="fields">
+      <label>start offset <span><input type="number" data-field="racerOffset" data-ri="${ri}" value="${racer.start_offset_s / 60}" step="1" size="4"> min</span></label>
+      <label>priority <input type="number" data-field="racerPriority" data-ri="${ri}" value="${racer.priority}" step="0.5" min="0" size="3"></label>
+      <label>prefer <select data-field="racerPrefer" data-ri="${ri}" title="which sighting of this racer matters most">
+        ${options(["finish", "neutral", "en_route"], racer.prefer ?? "finish", { finish: "the finish", neutral: "during, then finish", en_route: "during, always" })}
+      </select></label>
+    </div>
+    ${profile}`;
+}
+
+/** One interval of a profile: the stretch it covers, its pace and spread, and how to reshape it. */
+function paceRow(racer, ri, ii, locked, ui) {
+  const p = racer.pace_profile[ii];
+  const merge = ii + 1 < racer.pace_profile.length ? `<button data-act="mergeInterval" data-ri="${ri}" data-ii="${ii}" title="Merge with next">merge ↓</button>` : "";
+  return `<div class="row">
+    <span class="muted">${(p.start_m * ui.unit.perMetre).toFixed(1)}&ndash;${distanceLabel(p.end_m, ui.unit, 1)}</span>
+    ${paceInput(racer, ri, ii, ui)}
+    &plusmn; ${spreadInput(racer, ri, ii)}%
+    ${splitPaceButton(ri, ii, locked, "⋯", "Split this interval in half")}
+    ${merge}
+  </div>`;
+}
+
+const paceInput = (racer, ri, ii, ui) =>
+  `<input data-field="pace" data-ri="${ri}" data-ii="${ii}" value="${paceLabel(racer.pace_profile[ii].seconds_per_km, ui.unit)}" size="5" title="min:sec per ${ui.unit.label}" aria-label="Pace">`;
+
+const spreadInput = (racer, ri, ii) =>
+  `<input type="number" data-field="uncertainty" data-ri="${ri}" data-ii="${ii}" value="${Math.round(racer.pace_profile[ii].uncertainty * 100)}" min="0" max="99" size="2" aria-label="Pace uncertainty">`;
+
+const splitPaceButton = (ri, ii, locked, label, title) =>
+  locked ? addButton("splitInterval", true, "paces", label) : `<button data-act="splitInterval" data-ri="${ri}" data-ii="${ii}" title="${title}">${label}</button>`;
 
 function spectatorSection(event, ui) {
   const s = event.spectator;
@@ -209,13 +287,13 @@ function spectatorSection(event, ui) {
   return `<details class="section" data-section="spectator">
     <summary><h2>Spectator</h2></summary>
     <div class="fields">
-      <label>out from <input type="time" data-field="earliest" value="${state.clock(s.earliest)}"></label>
-      ${s.mode === "drive" ? "" : `<label>${s.mode} speed <span><input type="number" data-field="speed" value="${state.speedLabel(s.speed_mps ?? state.DEFAULT_SPEED_MPS[s.mode], ui.unit)}" min="0.5" step="0.5" size="4" title="your pace on ordinary streets"> ${ui.unit.speed}</span></label>`}
+      <label>out from <input type="time" data-field="earliest" value="${clock(s.earliest)}"></label>
+      ${s.mode === "drive" ? "" : `<label>${s.mode} speed <span><input type="number" data-field="speed" value="${speedLabel(s.speed_mps ?? DEFAULT_SPEED_MPS[s.mode], ui.unit)}" min="0.5" step="0.5" size="4" title="your pace on ordinary streets"> ${ui.unit.speed}</span></label>`}
     </div>
     ${advanced(
       "spectator-adv",
       `<div class="fields">
-      <label>until <input type="time" data-field="latest" value="${s.latest ? state.clock(s.latest) : ""}"></label>
+      <label>until <input type="time" data-field="latest" value="${s.latest ? clock(s.latest) : ""}"></label>
       <label>travel <select data-field="travel">${options(TRAVEL, s.mode)}</select></label>
     </div>
     <div class="row">
@@ -224,7 +302,7 @@ function spectatorSection(event, ui) {
     </div>
     <div class="row">
       ${toolButton("setEnd", tool("end"), s.end ? "Move end" : "Set end", "Click the map")}
-      ${s.end ? `<label>by <input type="time" data-field="endLatest" value="${state.clock(s.end.latest)}"></label><button data-act="clearEnd" title="Remove end point" aria-label="Remove end point">${TRASH}</button>` : ""}
+      ${s.end ? `<label>by <input type="time" data-field="endLatest" value="${clock(s.end.latest)}"></label><button data-act="clearEnd" title="Remove end point" aria-label="Remove end point">${TRASH}</button>` : ""}
     </div>
     <div class="row">
       ${toolButton("addRegion", tool("region"), "Add must-visit area", "Click the map")}
@@ -252,7 +330,7 @@ function advanced(section, content) {
 
 /** Feel-only tunables, kept per browser so they can be tried without a code change. */
 function debugSection(ui) {
-  const rows = Object.entries(state.DEBUG_DEFAULTS)
+  const rows = Object.entries(DEBUG_DEFAULTS)
     .map(([k, d]) => `<label>${d.label} <span><input type="number" data-field="debug" data-key="${k}" value="${ui.debug[k]}" min="0" step="${d.unit === "%" ? 1 : 50}" size="5"> ${d.unit}</span></label>`)
     .join("");
   return `<details class="section" data-section="debug">
@@ -283,12 +361,12 @@ function results(itinerary, event, ui) {
   const name = (id) => event.racers.find((r) => r.id === id)?.name ?? id;
   const stops = itinerary.stops
     .map((stop, i) => {
-      const label = state.stopLabel(event, i);
-      const when = label === "Start" ? state.clock(stop.depart) : `${state.clock(stop.arrive)}–${state.clock(stop.depart)}`;
+      const label = stopLabel(event, i);
+      const when = label === "Start" ? clock(stop.depart) : `${clock(stop.arrive)}–${clock(stop.depart)}`;
       return `<li data-act="flyTo" data-stop="${i}">
       <b>${label}</b> ${when}
-      <ul>${stop.seen.map((s) => `<li>${esc(name(s.racer_id))} <span class="muted">${s.kind} ~${state.clock(s.expected)}</span></li>`).join("")}</ul>
-      ${itinerary.legs[i] ? `<p class="muted">→ ${Math.round(itinerary.legs[i].seconds / 60)} min · ${state.distanceLabel(state.pathLength(itinerary.legs[i].path), ui.unit, 1)}</p>` : ""}
+      <ul>${stop.seen.map((s) => `<li>${esc(name(s.racer_id))} <span class="muted">${s.kind} ~${clock(s.expected)}</span></li>`).join("")}</ul>
+      ${itinerary.legs[i] ? `<p class="muted">→ ${Math.round(itinerary.legs[i].seconds / 60)} min · ${distanceLabel(polylineLength(itinerary.legs[i].path), ui.unit, 1)}</p>` : ""}
     </li>`;
     })
     .join("");
@@ -305,7 +383,7 @@ function alternatives(ui) {
   const items = ui.alternatives
     .map(
       ({ alt, variant, itinerary }, i) =>
-        `<li>With ${esc(alt.label)}: ${state.planSummary(variant, itinerary)} <button data-act="useAlternative" data-alt="${i}" ${ui.busy ? "disabled" : ""}>Use</button></li>`,
+        `<li>With ${esc(alt.label)}: ${planSummary(variant, itinerary)} <button data-act="useAlternative" data-alt="${i}" ${ui.busy ? "disabled" : ""}>Use</button></li>`,
     )
     .join("");
   return `<p>Better plans are possible:</p><ul class="alternatives">${items}</ul>`;
@@ -327,7 +405,7 @@ const GEAR = `<svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><circle c
 /** An "add" button, or the same button greyed under a lock when the tier has no room for another `what`. */
 const addButton = (act, locked, what, label = "+") =>
   locked
-    ? `<button data-act="locked" data-what="${what}" class="locked" title="Plus allows more">${label}<span class="lock">${LOCK}</span></button>`
+    ? `<button data-act="locked" data-what="${what}" class="locked" title="${TIERS.plus.label} allows more">${label}<span class="lock">${LOCK}</span></button>`
     : `<button data-act="${act}">${label}</button>`;
 
 const toolButton = (act, active, idle, working, extra = "") =>
@@ -339,6 +417,6 @@ const TRASH = `<svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path fi
 const options = (values, selected, labels = {}) =>
   values.map((v) => `<option value="${v}" ${v === selected ? "selected" : ""}>${labels[v] ?? v}</option>`).join("");
 
-export function esc(text) {
+function esc(text) {
   return String(text).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 }

@@ -10,18 +10,20 @@
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 
-use birdseye_core::{Objective, Prefer, Seconds, Weights};
+use birdseye_core::{Objective, Prefer, Seconds};
 use fixedbitset::FixedBitSet;
 
 use crate::trace::LabelEvent;
-use crate::viewpoints::{Kind, Viewpoint};
+use crate::viewpoints::{Kind, Sighting};
 
 /// Search events are handed to the sink in batches of this many.
 const EVENT_BATCH: usize = 2_000;
 
-#[derive(Debug, Clone)]
+/// Everything the search reads: sightings per viewpoint, how long it takes to move between
+/// them, and the constraints on the day. Geometry stays with the caller.
 pub struct Problem {
-    pub viewpoints: Vec<Viewpoint>,
+    /// `sightings[v]` is what viewpoint `v` offers, sorted by window open time.
+    pub sightings: Vec<Vec<Sighting>>,
     /// `travel[a][b]` seconds between viewpoints; `None` when unreachable.
     /// Must satisfy the triangle inequality (true for shortest-path times).
     pub travel: Vec<Vec<Option<Seconds>>>,
@@ -40,14 +42,52 @@ pub struct Problem {
 }
 
 /// A required region resolved onto viewpoints.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Region {
     pub inside: FixedBitSet,
     pub latest: Option<Seconds>,
 }
 
-fn max_priority(problem: &Problem) -> f64 {
-    problem.priorities.iter().cloned().fold(0.0, f64::max)
+/// Objective weights resolved for a field of racers; each level outweighs everything the
+/// levels below it could accumulate, so the scalar score ranks plans lexicographically.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Weights {
+    /// Bonus once every racer has had their preferred sighting.
+    everyone_preferred: f64,
+    /// Bonus once every racer's finish has been seen; zero when finishes are required instead.
+    everyone_finished: f64,
+    /// A racer's first sighting of their preferred kind, scaled by priority.
+    preferred: f64,
+    /// A racer's first sighting of the other kind, scaled by priority.
+    other: f64,
+    /// The `k`-th en-route sighting of a racer is worth `priority × repeat_decay^k` of this.
+    repeat: f64,
+    /// Charged per finish missed when finishes are required: more than every level earns.
+    missed_finish: f64,
+    /// Charged per required region missed: more than every level and every finish could earn.
+    missed_region: f64,
+}
+
+pub(crate) fn weights(objective: &Objective, racers: usize, max_priority: f64) -> Weights {
+    let level = level_base(objective, racers, max_priority);
+    let required = objective.require_finishes;
+    Weights {
+        everyone_preferred: level.powi(4),
+        everyone_finished: if required { 0.0 } else { level.powi(3) },
+        preferred: level.powi(2),
+        other: level,
+        repeat: 1.0,
+        missed_finish: if required { level.powi(5) } else { 0.0 },
+        missed_region: level.powi(6),
+    }
+}
+
+/// Ten times the most a single level can be worth, so the scalar stays exact in f64 for
+/// fields of hundreds of racers.
+pub(crate) fn level_base(objective: &Objective, racers: usize, max_priority: f64) -> f64 {
+    let repeats = 1.0 / (1.0 - objective.repeat_decay.clamp(0.0, 0.9));
+    let most = (racers.max(1) as f64 * max_priority.max(1.0) * repeats).max(1.0);
+    (10.0 * most).ceil()
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -69,11 +109,12 @@ pub struct Stop {
     pub viewpoint: usize,
     pub arrive: Seconds,
     pub depart: Seconds,
-    /// Indices into `viewpoints[viewpoint].sightings`.
+    /// Indices into `Problem::sightings[viewpoint]`.
     pub sightings: Vec<usize>,
 }
 
-/// Raw solver output referencing viewpoints and sightings by index; `Itinerary` is the rendered form.
+/// Raw solver output referencing viewpoints and sightings by index; `Itinerary` is the
+/// rendered form.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Plan {
     /// Begins at the start anchor when there is one and ends at the end anchor when there is one.
@@ -88,29 +129,31 @@ pub fn plan(problem: &Problem, options: Options) -> Plan {
     plan_with(problem, options, &mut |_| {})
 }
 
+fn max_priority(problem: &Problem) -> f64 {
+    problem.priorities.iter().copied().fold(0.0, f64::max)
+}
+
 /// `plan`, reporting search events to `sink` in batches as it goes when `options.trace` is set.
 pub fn plan_with(
     problem: &Problem,
     options: Options,
     sink: &mut dyn FnMut(Vec<LabelEvent>),
 ) -> Plan {
+    let (racers, top) = (problem.priorities.len(), max_priority(problem));
     let mut search = Search {
         problem,
         options,
         sink,
-        weights: problem.objective.weights(problem.priorities.len(), max_priority(problem)),
-        missed_region: problem
-            .objective
-            .missed_region(problem.priorities.len(), max_priority(problem)),
-        field: (0..problem.priorities.len()).filter(|&r| problem.priorities[r] > 0.0).collect(),
+        weights: weights(&problem.objective, racers, top),
+        field: (0..racers).filter(|&r| problem.priorities[r] > 0.0).collect(),
         labels: Vec::new(),
-        kept: vec![Vec::new(); problem.viewpoints.len()],
+        kept: vec![Vec::new(); problem.sightings.len()],
         queue: BinaryHeap::new(),
         events: Vec::new(),
     };
     let roots: Vec<usize> = match problem.start {
         Some(start) => vec![start],
-        None => (0..problem.viewpoints.len()).collect(),
+        None => (0..problem.sightings.len()).collect(),
     };
     for root in roots {
         let label = Label::root(root, problem);
@@ -203,6 +246,8 @@ impl PartialOrd for Queued {
 /// `a` leaves no later, scores no less, and has at least as much left to gain. Sound because
 /// every sighting of a racer who counts is worth strictly more to the label that lacks it.
 fn dominates(a: &Label, b: &Label) -> bool {
+    // `kept` never holds a dead label, but `Label::kill` empties the sets this compares, so
+    // the guard keeps a stray dead `a` from dominating everything on truncated fields.
     a.alive
         && a.depart <= b.depart
         && a.score >= b.score
@@ -215,7 +260,6 @@ struct Search<'a> {
     problem: &'a Problem,
     options: Options,
     weights: Weights,
-    missed_region: f64,
     /// Racers with positive priority: the ones "everyone" means.
     field: Vec<usize>,
     labels: Vec<Label>,
@@ -270,24 +314,25 @@ impl Search<'_> {
                     .then(labels[b].score.total_cmp(&labels[a].score))
             })
             .expect("non-empty");
+        // On a tie in coverage the earliest departure wins, so the two spared slots collapse
+        // into one and the beam key decides one more label than it otherwise would.
         let broadest = *kept
             .iter()
             .max_by_key(|&&i| (self.preferred_of_field(&labels[i]), i == earliest))
             .expect("non-empty");
-        let keys: Vec<f64> = kept.iter().map(|&i| self.beam_key(&labels[i])).collect();
-        let mut order: Vec<usize> = (0..kept.len()).collect();
-        order.sort_by(|&x, &y| {
-            let spared = |i: usize| kept[i] == earliest || kept[i] == broadest;
-            spared(y).cmp(&spared(x)).then(keys[y].total_cmp(&keys[x]))
+        let mut ranked: Vec<(usize, f64)> = std::mem::take(&mut self.kept[at])
+            .into_iter()
+            .map(|label| (label, self.beam_key(&self.labels[label])))
+            .collect();
+        ranked.sort_by(|&(x, key_x), &(y, key_y)| {
+            let spared = |i| i == earliest || i == broadest;
+            spared(y).cmp(&spared(x)).then(key_y.total_cmp(&key_x))
         });
-        let (keep, drop) = order.split_at(self.options.beam);
-        let survivors: Vec<usize> = keep.iter().map(|&x| kept[x]).collect();
-        let dropped: Vec<usize> = drop.iter().map(|&x| kept[x]).collect();
-        for label in dropped {
+        for (label, _) in ranked.split_off(self.options.beam) {
             self.labels[label].kill();
             self.record(LabelEvent::Trimmed { label });
         }
-        self.kept[at] = survivors;
+        self.kept[at] = ranked.into_iter().map(|(label, _)| label).collect();
     }
 
     fn record(&mut self, event: LabelEvent) {
@@ -337,7 +382,7 @@ impl Search<'_> {
     fn expand(&mut self, index: usize) {
         let from = self.labels[index].viewpoint;
         let depart = self.labels[index].depart;
-        for next in 0..self.problem.viewpoints.len() {
+        for next in 0..self.problem.sightings.len() {
             if next == from {
                 continue;
             }
@@ -349,7 +394,7 @@ impl Search<'_> {
 
     /// One successor per useful leave time at `at`, having arrived there from `parent`.
     fn dwell(&mut self, parent: usize, at: usize, arrive: Seconds) {
-        let sightings = &self.problem.viewpoints[at].sightings;
+        let sightings = &self.problem.sightings[at];
         // A window shutting the instant we arrive cannot be watched in full; this is also what
         // keeps every path's time strictly increasing when travel is free.
         let open: Vec<usize> = (0..sightings.len())
@@ -403,10 +448,10 @@ impl Search<'_> {
 
     /// Marginal value of one more sighting given what this label has already seen; the last
     /// racer to complete a set earns that set's bonus on top.
-    fn gain(&self, label: &Label, sighting: &crate::viewpoints::Sighting) -> f64 {
+    fn gain(&self, label: &Label, sighting: &Sighting) -> f64 {
         let racer = sighting.racer;
         let priority = self.problem.priorities[racer];
-        let counts = priority > 0.0;
+        let in_field = priority > 0.0;
         let w = &self.weights;
         let first = match sighting.kind {
             Kind::Finish => !label.finished.contains(racer),
@@ -434,10 +479,10 @@ impl Search<'_> {
                 }
                 (false, _) => w.other,
             };
-        if counts && preferred && self.preferred_of_field(label) + 1 == self.field.len() {
+        if in_field && preferred && self.preferred_of_field(label) + 1 == self.field.len() {
             value += w.everyone_preferred;
         }
-        if counts
+        if in_field
             && sighting.kind == Kind::Finish
             && self.finished_of_field(label) + 1 == self.field.len()
         {
@@ -473,7 +518,7 @@ impl Search<'_> {
     fn rank(&self, label: &Label) -> f64 {
         let regions = (self.problem.regions.len() - label.regions_done.count_ones(..)) as f64;
         let finishes = (self.field.len() - self.finished_of_field(label)) as f64;
-        label.score - self.weights.missed_finish * finishes - self.missed_region * regions
+        label.score - self.weights.missed_finish * finishes - self.weights.missed_region * regions
     }
 
     /// What the beam keeps by: the rank plus credit for progress toward each completeness
@@ -500,12 +545,12 @@ impl Search<'_> {
                 unmet_regions: (0..self.problem.regions.len()).collect(),
             };
         };
-        let mut stops = Vec::new();
+        let mut stops: Vec<Stop> = Vec::new();
         let mut current = Some(chosen);
         while let Some(label) = current {
             // The root is a stop only when it is a start anchor the itinerary moves away from.
             let root = label.parent.is_none();
-            let listed = stops.last().is_some_and(|s: &Stop| s.viewpoint == label.viewpoint);
+            let listed = stops.last().is_some_and(|s| s.viewpoint == label.viewpoint);
             if root && (self.problem.start.is_none() || listed) {
                 break;
             }
@@ -533,10 +578,8 @@ impl Search<'_> {
 #[cfg(test)]
 mod tests {
     use birdseye_core::Window;
-    use birdseye_core::geom::Point;
 
     use super::*;
-    use crate::viewpoints::Sighting;
 
     fn sighting(racer: usize, open: f64, close: f64) -> Sighting {
         Sighting {
@@ -551,8 +594,24 @@ mod tests {
         Sighting { kind: Kind::Finish, ..sighting(racer, open, close) }
     }
 
-    fn viewpoint(node: usize, sightings: Vec<Sighting>) -> Viewpoint {
-        Viewpoint { node, point: Point::new(node as f64, 0.0), arcs: Vec::new(), sightings }
+    #[test]
+    fn weights_separate_levels() {
+        let objective = Objective::default();
+        assert_eq!(
+            level_base(&objective, 1, 1.0),
+            20.0,
+            "one racer, decay 0.5: at most 2 points per level, times ten"
+        );
+        let w = weights(&objective, 1, 1.0);
+        assert_eq!(w.everyone_preferred, 160_000.0);
+        assert_eq!(w.everyone_finished, 8_000.0);
+        assert_eq!(w.preferred, 400.0);
+        assert_eq!(w.other, 20.0);
+        assert_eq!((w.repeat, w.missed_finish), (1.0, 0.0));
+        assert_eq!(w.missed_region, 64_000_000.0);
+        let required = weights(&Objective { require_finishes: true, ..objective }, 1, 1.0);
+        assert_eq!((required.everyone_finished, required.missed_finish), (0.0, 3_200_000.0));
+        assert_eq!(level_base(&objective, 30, 1.0), 600.0);
     }
 
     /// Two racers of priority 1 at decay 0.5 give a level of 40; both are neutral, so a first
@@ -563,13 +622,13 @@ mod tests {
 
     /// Viewpoints in a line, ten seconds apart, spectator starting at 0; two racers of equal
     /// priority, so repeats are worth 0.5, 0.25, … on top of the constants above.
-    fn line(viewpoints: Vec<Viewpoint>) -> Problem {
-        let n = viewpoints.len();
+    fn line(sightings: Vec<Vec<Sighting>>) -> Problem {
+        let n = sightings.len();
         let travel = (0..n)
             .map(|a| (0..n).map(|b| Some(10.0 * (a as f64 - b as f64).abs())).collect())
             .collect();
         Problem {
-            viewpoints,
+            sightings,
             travel,
             start: Some(0),
             earliest: 0.0,
@@ -594,10 +653,10 @@ mod tests {
     #[test]
     fn walks_alongside_a_single_racer_with_diminishing_returns() {
         let problem = line(vec![
-            viewpoint(0, vec![]),
-            viewpoint(1, vec![sighting(0, 20.0, 25.0)]),
-            viewpoint(2, vec![sighting(0, 40.0, 45.0)]),
-            viewpoint(3, vec![sighting(0, 60.0, 65.0)]),
+            vec![],
+            vec![sighting(0, 20.0, 25.0)],
+            vec![sighting(0, 40.0, 45.0)],
+            vec![sighting(0, 60.0, 65.0)],
         ]);
         let plan = plan(&problem, Options::default());
         assert_eq!(plan.score, FIRST + 0.5 + 0.25);
@@ -608,14 +667,12 @@ mod tests {
 
     #[test]
     fn breadth_beats_depth() {
-        // Camping at 1 sees racer 0 three times; going to 2 sees racer 1 once instead of the third repeat.
+        // Camping at 1 sees racer 0 three times; going to 2 sees racer 1 once instead of the
+        // third repeat.
         let problem = line(vec![
-            viewpoint(0, vec![]),
-            viewpoint(
-                1,
-                vec![sighting(0, 10.0, 12.0), sighting(0, 20.0, 22.0), sighting(0, 40.0, 42.0)],
-            ),
-            viewpoint(2, vec![sighting(1, 35.0, 40.0)]),
+            vec![],
+            vec![sighting(0, 10.0, 12.0), sighting(0, 20.0, 22.0), sighting(0, 40.0, 42.0)],
+            vec![sighting(1, 35.0, 40.0)],
         ]);
         let plan = plan(&problem, Options::default());
         assert_eq!(plan.score, EVERYONE + 2.0 * FIRST + 0.5);
@@ -625,9 +682,9 @@ mod tests {
     #[test]
     fn a_finish_beats_a_repeat() {
         let problem = line(vec![
-            viewpoint(0, vec![]),
-            viewpoint(1, vec![sighting(0, 10.0, 12.0), sighting(0, 30.0, 32.0)]),
-            viewpoint(2, vec![finish(0, 25.0, 30.0)]),
+            vec![],
+            vec![sighting(0, 10.0, 12.0), sighting(0, 30.0, 32.0)],
+            vec![finish(0, 25.0, 30.0)],
         ]);
         assert_eq!(plan(&problem, Options::default()).score, FIRST + FINISH);
     }
@@ -635,9 +692,9 @@ mod tests {
     #[test]
     fn preference_and_required_finishes_steer_between_exclusive_spots() {
         let mut problem = line(vec![
-            viewpoint(0, vec![]),
-            viewpoint(1, vec![sighting(0, 10.0, 12.0), sighting(1, 12.0, 14.0)]),
-            viewpoint(2, vec![finish(0, 20.0, 21.0), finish(1, 21.0, 22.0)]),
+            vec![],
+            vec![sighting(0, 10.0, 12.0), sighting(1, 12.0, 14.0)],
+            vec![finish(0, 20.0, 21.0), finish(1, 21.0, 22.0)],
         ]);
         let en_route = plan(&problem, Options::default());
         assert_eq!(en_route.stops.last().unwrap().viewpoint, 1);
@@ -662,9 +719,9 @@ mod tests {
     #[test]
     fn en_route_only_racers_rate_a_finish_like_a_repeat() {
         let mut problem = line(vec![
-            viewpoint(0, vec![]),
-            viewpoint(1, vec![sighting(0, 10.0, 12.0), sighting(0, 30.0, 32.0)]),
-            viewpoint(2, vec![finish(0, 25.0, 30.0)]),
+            vec![],
+            vec![sighting(0, 10.0, 12.0), sighting(0, 30.0, 32.0)],
+            vec![finish(0, 25.0, 30.0)],
         ]);
         problem.prefer[0] = Prefer::EnRoute;
         let plan = plan(&problem, Options::default());
@@ -676,10 +733,10 @@ mod tests {
     fn completing_the_field_outweighs_any_finish() {
         // Finishing racer 0 at 2 is worth 10 000; seeing racer 1 at 3 completes the field instead.
         let problem = line(vec![
-            viewpoint(0, vec![]),
-            viewpoint(1, vec![sighting(0, 10.0, 12.0)]),
-            viewpoint(2, vec![finish(0, 25.0, 30.0)]),
-            viewpoint(3, vec![sighting(1, 35.0, 38.0)]),
+            vec![],
+            vec![sighting(0, 10.0, 12.0)],
+            vec![finish(0, 25.0, 30.0)],
+            vec![sighting(1, 35.0, 38.0)],
         ]);
         let plan = plan(&problem, Options::default());
         assert_eq!(plan.score, EVERYONE + 2.0 * FIRST);
@@ -688,7 +745,7 @@ mod tests {
 
     #[test]
     fn start_anchor_with_sightings_is_one_stop() {
-        let problem = line(vec![viewpoint(0, vec![sighting(0, 5.0, 6.0)]), viewpoint(1, vec![])]);
+        let problem = line(vec![vec![sighting(0, 5.0, 6.0)], vec![]]);
         let plan = plan(&problem, Options::default());
         assert_eq!(plan.stops.len(), 1);
         assert_eq!(plan.stops[0].sightings, vec![0]);
@@ -700,19 +757,14 @@ mod tests {
         // the beam must keep the label that is one racer short of everyone.
         let mut hub = vec![sighting(0, 10.0, 12.0)];
         hub.extend((0..6).map(|i| finish(0, 20.0 + i as f64, 21.0 + i as f64)));
-        let problem = line(vec![
-            viewpoint(0, vec![]),
-            viewpoint(1, hub),
-            viewpoint(2, vec![sighting(1, 45.0, 46.0)]),
-        ]);
+        let problem = line(vec![vec![], hub, vec![sighting(1, 45.0, 46.0)]]);
         let plan = plan(&problem, Options { beam: 1, ..Options::default() });
         assert!(plan.score >= EVERYONE, "{}", plan.score);
     }
 
     #[test]
     fn zero_priority_racers_do_not_gate_everyone() {
-        let mut problem =
-            line(vec![viewpoint(0, vec![]), viewpoint(1, vec![sighting(0, 20.0, 25.0)])]);
+        let mut problem = line(vec![vec![], vec![sighting(0, 20.0, 25.0)]]);
         problem.priorities[1] = 0.0;
         let plan = plan(&problem, Options::default());
         assert_eq!(plan.score, EVERYONE + FIRST);
@@ -720,11 +772,7 @@ mod tests {
 
     #[test]
     fn planner_picks_the_start_when_none_is_given() {
-        let mut problem = line(vec![
-            viewpoint(0, vec![]),
-            viewpoint(1, vec![]),
-            viewpoint(2, vec![sighting(0, 5.0, 6.0)]),
-        ]);
+        let mut problem = line(vec![vec![], vec![], vec![sighting(0, 5.0, 6.0)]]);
         problem.start = None;
         let plan = plan(&problem, Options::default());
         assert_eq!(plan.stops.len(), 1);
@@ -735,10 +783,10 @@ mod tests {
     #[test]
     fn required_region_pulls_the_route_and_is_reported_when_impossible() {
         let mut problem = line(vec![
-            viewpoint(0, vec![]),
-            viewpoint(1, vec![sighting(0, 15.0, 20.0)]),
-            viewpoint(2, vec![sighting(1, 25.0, 30.0)]),
-            viewpoint(3, vec![sighting(1, 40.0, 45.0)]),
+            vec![],
+            vec![sighting(0, 15.0, 20.0)],
+            vec![sighting(1, 25.0, 30.0)],
+            vec![sighting(1, 40.0, 45.0)],
         ]);
         let mut inside = FixedBitSet::with_capacity(4);
         inside.insert(3);
@@ -755,11 +803,8 @@ mod tests {
 
     #[test]
     fn required_region_can_be_satisfied_by_just_standing_there() {
-        let mut problem = line(vec![
-            viewpoint(0, vec![]),
-            viewpoint(1, vec![sighting(0, 15.0, 20.0), sighting(1, 25.0, 30.0)]),
-            viewpoint(2, vec![]),
-        ]);
+        let mut problem =
+            line(vec![vec![], vec![sighting(0, 15.0, 20.0), sighting(1, 25.0, 30.0)], vec![]]);
         let mut inside = FixedBitSet::with_capacity(3);
         inside.insert(2);
         problem.regions.push(Region { inside, latest: None });
@@ -771,8 +816,7 @@ mod tests {
 
     #[test]
     fn ending_where_the_last_sighting_was_adds_no_stop() {
-        let mut problem =
-            line(vec![viewpoint(0, vec![]), viewpoint(1, vec![sighting(0, 20.0, 25.0)])]);
+        let mut problem = line(vec![vec![], vec![sighting(0, 20.0, 25.0)]]);
         problem.end = Some((1, 100.0));
         let plan = plan(&problem, Options::default());
         assert_eq!(plan.stops.len(), 2);
@@ -780,11 +824,8 @@ mod tests {
 
     #[test]
     fn end_deadline_and_day_end_limit_the_wandering() {
-        let mut problem = line(vec![
-            viewpoint(0, vec![]),
-            viewpoint(1, vec![sighting(0, 20.0, 25.0)]),
-            viewpoint(2, vec![sighting(1, 100.0, 105.0)]),
-        ]);
+        let mut problem =
+            line(vec![vec![], vec![sighting(0, 20.0, 25.0)], vec![sighting(1, 100.0, 105.0)]]);
         problem.end = Some((0, 60.0));
         let anchored = plan(&problem, Options::default());
         assert_eq!(anchored.score, FIRST);
@@ -801,8 +842,7 @@ mod tests {
 
     #[test]
     fn min_stop_delays_departure() {
-        let mut problem =
-            line(vec![viewpoint(0, vec![]), viewpoint(1, vec![sighting(0, 20.0, 21.0)])]);
+        let mut problem = line(vec![vec![], vec![sighting(0, 20.0, 21.0)]]);
         problem.min_stop = 30.0;
         let plan = plan(&problem, Options::default());
         assert_eq!(plan.stops[1].depart, 40.0);
@@ -810,7 +850,7 @@ mod tests {
 
     #[test]
     fn zero_length_windows_terminate() {
-        let problem = line(vec![viewpoint(0, vec![]), viewpoint(1, vec![sighting(0, 20.0, 20.0)])]);
+        let problem = line(vec![vec![], vec![sighting(0, 20.0, 20.0)]]);
         assert_eq!(plan(&problem, Options::default()).score, FIRST);
     }
 
@@ -818,11 +858,7 @@ mod tests {
     fn narrow_beam_keeps_the_early_departure() {
         let mut hub = vec![sighting(0, 10.0, 12.0)];
         hub.extend((0..5).map(|i| sighting(0, 20.0 + i as f64, 30.0 + i as f64)));
-        let problem = line(vec![
-            viewpoint(0, vec![]),
-            viewpoint(1, hub),
-            viewpoint(2, vec![sighting(1, 25.0, 26.0)]),
-        ]);
+        let problem = line(vec![vec![], hub, vec![sighting(1, 25.0, 26.0)]]);
         let plan = plan(&problem, Options { beam: 1, ..Options::default() });
         assert_eq!(plan.score, EVERYONE + 2.0 * FIRST);
     }

@@ -5,9 +5,9 @@ import { createEngine } from "../src/engine.js";
 describe("engine", () => {
   const engine = createEngine();
 
-  it("round-trips a ping through the WASM engine", async () => {
-    const reply = await engine.call("ping", { msg: "hello" });
-    expect(reply).toMatch(/^birdseye \d+\.\d+\.\d+: hello$/);
+  it("reports the engine version over the worker bridge", async () => {
+    const reply = await engine.call("version", {});
+    expect(reply).toMatch(/^\d+\.\d+\.\d+$/);
   });
 
   it("validates an event and reports problems", async () => {

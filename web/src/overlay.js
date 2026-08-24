@@ -2,6 +2,8 @@
 // change, which cannot keep up with animating thousands of points; drawing them here costs a few
 // milliseconds a frame. Points are projected once per map view and cached.
 
+import { metresPerPixel } from "./map.js";
+
 export function overlay(map) {
   const container = map.getContainer();
   const canvas = document.createElement("canvas");
@@ -32,24 +34,22 @@ export function overlay(map) {
     if (!projected.has(id)) projected.set(id, points.map((p) => map.project([p.lon, p.lat])));
     return projected.get(id);
   };
-  const metresPerPixel = () => (156543.03 * Math.cos((map.getCenter().lat * Math.PI) / 180)) / 2 ** map.getZoom();
-
   return {
     clear() {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
     },
-    /** Dots for `points[from..to)`; the set is projected once under `id`. */
-    dots(id, points, color, radiusPx, alpha, from = 0, to = points.length) {
+    /** Dots for the first `to` of `points`; the set is projected once under `id`. */
+    dots(id, points, color, radiusPx, alpha, to = points.length) {
       const xy = project(id, points);
       ctx.fillStyle = color;
       ctx.globalAlpha = alpha;
       // At a couple of pixels a square reads as a dot and costs a fraction of an arc.
       if (radiusPx <= 2.5) {
         const size = radiusPx * 2;
-        for (let i = from; i < to; i++) ctx.fillRect(xy[i].x - radiusPx, xy[i].y - radiusPx, size, size);
+        for (let i = 0; i < to; i++) ctx.fillRect(xy[i].x - radiusPx, xy[i].y - radiusPx, size, size);
       } else {
         ctx.beginPath();
-        for (let i = from; i < to; i++) {
+        for (let i = 0; i < to; i++) {
           const { x, y } = xy[i];
           ctx.moveTo(x + radiusPx, y);
           ctx.arc(x, y, radiusPx, 0, 2 * Math.PI);
@@ -80,7 +80,7 @@ export function overlay(map) {
      */
     sectors(id, centres, color, radiusM, alpha, sweep = 2 * Math.PI) {
       const xy = project(id, centres);
-      const r = radiusM / metresPerPixel();
+      const r = radiusM / metresPerPixel(map);
       const start = -Math.PI / 2;
       ctx.fillStyle = color;
       ctx.globalAlpha = alpha;
@@ -106,10 +106,6 @@ export function overlay(map) {
       });
       ctx.stroke();
       ctx.globalAlpha = 1;
-    },
-    remove() {
-      map.off("resize", resize);
-      canvas.remove();
     },
   };
 }

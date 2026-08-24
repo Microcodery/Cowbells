@@ -15,10 +15,6 @@ pub trait TravelTime {
     fn snap(&self, p: Point, max_distance: f64) -> Option<NodeId>;
     fn node_count(&self) -> usize;
     fn point(&self, id: NodeId) -> Point;
-    fn time(&self, from: NodeId, to: NodeId) -> Option<Seconds>;
-    fn path(&self, from: NodeId, to: NodeId) -> Option<Vec<Point>>;
-    /// Pairwise times between `nodes`; `None` where unreachable.
-    fn matrix(&self, nodes: &[NodeId]) -> Vec<Vec<Option<Seconds>>>;
     /// Pairwise times plus the shortest-path trees behind them, for cheap paths afterwards.
     fn routes(&self, nodes: &[NodeId]) -> Routes;
 }
@@ -34,7 +30,7 @@ pub struct Routes {
 const NO_NODE: u32 = u32::MAX;
 
 impl Routes {
-    pub fn new(sources: &[NodeId], rows: Vec<(Vec<Seconds>, Vec<Option<NodeId>>)>) -> Self {
+    pub(crate) fn new(sources: &[NodeId], rows: Vec<(Vec<Seconds>, Vec<Option<NodeId>>)>) -> Self {
         let times = rows
             .iter()
             .map(|(cost, _)| {

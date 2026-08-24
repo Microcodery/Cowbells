@@ -75,17 +75,6 @@ impl Polyline {
         Euclidean.length(&self.0)
     }
 
-    /// Running distance at each vertex, starting at 0.
-    pub fn cumulative(&self) -> Vec<f64> {
-        let mut total = 0.0;
-        std::iter::once(0.0)
-            .chain(self.0.lines().map(|line| {
-                total += Euclidean.length(&line);
-                total
-            }))
-            .collect()
-    }
-
     pub fn point_at(&self, distance: f64) -> Point {
         let length = self.length();
         if length == 0.0 {
@@ -179,7 +168,6 @@ mod tests {
     fn lengths_and_interpolation() {
         let line = triangle();
         assert_eq!(line.length(), 12.0);
-        assert_eq!(line.cumulative(), vec![0.0, 3.0, 7.0, 12.0]);
         assert_eq!(line.point_at(7.0), Point::new(3.0, 4.0));
         assert_eq!(line.point_at(99.0), Point::new(0.0, 0.0));
     }

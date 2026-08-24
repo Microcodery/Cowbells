@@ -28,7 +28,7 @@ function convexHull(points) {
     chain.pop();
     return chain;
   };
-  return [...half(sorted), ...half(sorted.reverse())];
+  return [...half(sorted), ...half([...sorted].reverse())];
 }
 
 /**

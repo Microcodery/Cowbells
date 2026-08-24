@@ -1,6 +1,7 @@
 // The spectator's itinerary as GPX: one track for the walk, one waypoint per stop.
 
-import { clock, stopLabel } from "./state.js";
+import { clock } from "./format.js";
+import { stopLabel } from "./plans.js";
 
 export function itineraryToGpx(itinerary, event) {
   const name = (id) => event.racers.find((r) => r.id === id)?.name ?? id;

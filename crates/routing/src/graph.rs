@@ -13,7 +13,7 @@ use rstar::{AABB, RTree};
 use crate::Routes;
 use crate::TravelTime;
 use crate::osm::Osm;
-use crate::profile::{Direction, Passage, is_open_area, open_area_speed, passage};
+use crate::profile::{Direction, Passage, crosses_open_ground, is_open_area, passage};
 
 pub type NodeId = usize;
 
@@ -24,7 +24,7 @@ const OPEN_AREA_NEIGHBOURS: usize = 8;
 /// and city extracts hold thousands of them.
 const MIN_OPEN_AREA_SPAN_M: f64 = 60.0;
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy)]
 struct Edge {
     to: NodeId,
     seconds: Seconds,
@@ -77,7 +77,7 @@ impl Graph {
                 }
             }
         }
-        if let Some(speed) = open_area_speed(mode, speed) {
+        if crosses_open_ground(mode) {
             for way in osm.ways.iter().filter(|w| is_open_area(w)) {
                 let ring: Vec<_> = way
                     .nodes
@@ -87,7 +87,8 @@ impl Graph {
                     .collect();
                 let polygon = Polygon::new(LineString::from(ring), vec![]);
                 let spans = polygon.bounding_rect().is_some_and(|r| {
-                    Euclidean.distance(Point::from(r.min()), Point::from(r.max())) >= MIN_OPEN_AREA_SPAN_M
+                    Euclidean.distance(Point::from(r.min()), Point::from(r.max()))
+                        >= MIN_OPEN_AREA_SPAN_M
                 });
                 if spans {
                     graph.add_open_area(&polygon, speed);
@@ -168,12 +169,12 @@ impl Graph {
             .collect()
     }
 
-    pub fn distance(&self, a: NodeId, b: NodeId) -> f64 {
+    fn distance(&self, a: NodeId, b: NodeId) -> f64 {
         Euclidean.distance(self.points[a], self.points[b])
     }
 
     /// Straight-line links between nodes in an open area whenever the chord stays inside it.
-    pub fn add_open_area(&mut self, polygon: &Polygon, metres_per_second: f64) {
+    fn add_open_area(&mut self, polygon: &Polygon, metres_per_second: f64) {
         let inside = self.nodes_inside(polygon);
         let local = RTree::bulk_load(
             inside.iter().map(|&id| Indexed::new(coords(self.points[id]), id)).collect(),
@@ -221,7 +222,7 @@ impl Graph {
             let mut along = 0.0;
             while along <= course.length() {
                 let sample = coords(course.point_at(along));
-                for node in self.index.locate_within_distance(sample, 4.0 * width * width) {
+                for node in self.index.locate_within_distance(sample, (2.0 * width).powi(2)) {
                     in_roadway[node.data] = true;
                 }
                 along += width;
@@ -247,6 +248,28 @@ impl Graph {
 
     fn has_edge(&self, a: NodeId, b: NodeId) -> bool {
         self.edges[a].iter().any(|e| e.to == b)
+    }
+
+    /// Shortest time from `from` to `to`; `None` when unreachable.
+    pub fn time(&self, from: NodeId, to: NodeId) -> Option<Seconds> {
+        let (cost, _) = self.dijkstra(from, &[to]);
+        cost[to].is_finite().then_some(cost[to])
+    }
+
+    /// The shortest path from `from` to `to`, as points; `None` when unreachable.
+    pub fn path(&self, from: NodeId, to: NodeId) -> Option<Vec<Point>> {
+        let (cost, previous) = self.dijkstra(from, &[to]);
+        if !cost[to].is_finite() {
+            return None;
+        }
+        let mut path = vec![self.points[to]];
+        let mut node = to;
+        while let Some(prev) = previous[node] {
+            path.push(self.points[prev]);
+            node = prev;
+        }
+        path.reverse();
+        Some(path)
     }
 
     /// Shortest times from `source`, stopping once every `target` is settled.
@@ -305,30 +328,6 @@ impl TravelTime for Graph {
 
     fn point(&self, id: NodeId) -> Point {
         self.points[id]
-    }
-
-    fn time(&self, from: NodeId, to: NodeId) -> Option<Seconds> {
-        let (cost, _) = self.dijkstra(from, &[to]);
-        cost[to].is_finite().then_some(cost[to])
-    }
-
-    fn path(&self, from: NodeId, to: NodeId) -> Option<Vec<Point>> {
-        let (cost, previous) = self.dijkstra(from, &[to]);
-        if !cost[to].is_finite() {
-            return None;
-        }
-        let mut path = vec![self.points[to]];
-        let mut node = to;
-        while let Some(prev) = previous[node] {
-            path.push(self.points[prev]);
-            node = prev;
-        }
-        path.reverse();
-        Some(path)
-    }
-
-    fn matrix(&self, nodes: &[NodeId]) -> Vec<Vec<Option<Seconds>>> {
-        self.routes(nodes).times
     }
 
     fn routes(&self, nodes: &[NodeId]) -> Routes {
@@ -407,7 +406,7 @@ mod tests {
         assert_eq!(g.path(0, 2).unwrap().len(), 3);
         assert_eq!(g.snap(Point::new(1.2, 0.9), 0.5), Some(4));
         assert_eq!(g.snap(Point::new(9.0, 9.0), 0.5), None);
-        assert_eq!(g.matrix(&[0, 8])[0][1], Some(4.0));
+        assert_eq!(g.routes(&[0, 8]).times[0][1], Some(4.0));
     }
 
     #[test]
@@ -415,7 +414,7 @@ mod tests {
         let lonely = Graph::new(vec![Point::new(0.0, 0.0), Point::new(1.0, 0.0)]);
         assert_eq!(lonely.time(0, 1), None);
         assert_eq!(lonely.path(0, 1), None);
-        assert_eq!(lonely.matrix(&[0, 1])[0], vec![Some(0.0), None]);
+        assert_eq!(lonely.routes(&[0, 1]).times[0], vec![Some(0.0), None]);
     }
 
     #[test]
