@@ -324,6 +324,10 @@ h2 {
   margin-bottom: 6px;
 }
 
+.row.centered {
+  justify-content: center;
+}
+
 .row > input:not([type]) {
   flex: 1;
   min-width: 80px;

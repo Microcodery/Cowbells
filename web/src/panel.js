@@ -319,7 +319,7 @@ function coursesSection(event, ui) {
 /** The buttons that reshape a course, offered only once its shape is open for editing. */
 function courseTools(course, ci, ui) {
   if (ui.editing !== course.id) {
-    return `<div class="row"><button data-act="editCourse" data-ci="${ci}">Edit course</button></div>`;
+    return `<div class="row centered"><button data-act="editCourse" data-ci="${ci}">Edit course</button></div>`;
   }
   const snap = (field, on, label) => `<label title="Snapping is not built yet">${label} ${toggle(field, on, "disabled")}</label>`;
   return `<div class="row">

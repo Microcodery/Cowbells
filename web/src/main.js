@@ -134,9 +134,9 @@ function storedChoice(key, table, fallback) {
 
 function loadSnap() {
   try {
-    return { roads: true, paths: true, ...JSON.parse(localStorage.getItem(SNAP_KEY) ?? "{}") };
+    return { roads: false, paths: false, ...JSON.parse(localStorage.getItem(SNAP_KEY) ?? "{}") };
   } catch {
-    return { roads: true, paths: true };
+    return { roads: false, paths: false };
   }
 }
 
