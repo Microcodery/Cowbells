@@ -123,6 +123,36 @@ body {
   }
 }
 
+/* The little menu a click on the course opens, sitting where it was clicked. */
+#mapmenu {
+  position: absolute;
+  z-index: 7;
+  transform: translateX(-50%);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 10rem;
+}
+
+#mapmenu[hidden] {
+  display: none;
+}
+
+#mapmenu button {
+  width: 100%;
+  text-align: left;
+}
+
+#mapmenu label {
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--muted);
+}
+
 #hover {
   position: absolute;
   z-index: 5;
@@ -279,6 +309,11 @@ h2 {
   border-radius: 10px;
   padding: 10px;
   margin-bottom: 8px;
+}
+
+/* A course wears the colour it is drawn in, so card and map read as the same thing. */
+.card.course {
+  border-left-width: 4px;
 }
 
 .row {
@@ -651,6 +686,8 @@ input[type="checkbox"].toggle:checked::after {
   display: none;
   position: absolute;
   z-index: 6;
+  /* It reports; it does not answer. Taps belong to the map underneath it. */
+  pointer-events: none;
 }
 
 .phone-only {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mergeInterval, moveSegmentBoundary, newEvent, rebase, redoPoint, segmentBoundaries, undoPoint } from "../src/event.js";
+import { deletePoint, insertPoint, mergeInterval, moveSegmentBoundary, movePoint, newEvent, rebase, redoPoint, segmentBoundaries, undoPoint } from "../src/event.js";
 import { polylineLength } from "../src/geo.js";
 
 const racerWith = (...intervals) => ({
@@ -153,5 +153,45 @@ describe("undo and redo", () => {
   it("reports nothing to put back once the course is empty", () => {
     const course = { id: "c", segments: [{ id: "a", mode: "run", points: [], viewable: true }] };
     expect(undoPoint(course)).toBeNull();
+  });
+});
+
+describe("editing points", () => {
+  const at = (km) => ({ lat: 45 + km / 111.195, lon: -122 });
+
+  it("moves the point on both sides of a join, so the course stays in one piece", () => {
+    const course = twoSegments();
+    const moved = { lat: 45.02, lon: -122.01 };
+    expect(movePoint(course, 0, 1, moved)).toBe(true);
+    expect(course.segments[0].points.at(-1)).toEqual(moved);
+    expect(course.segments[1].points[0], "the next segment came along").toEqual(moved);
+  });
+
+  it("leaves a gap between segments open when it moves a point beside it", () => {
+    const course = twoSegments();
+    course.segments[1].points = [at(5), at(6)];
+    const moved = { lat: 45.02, lon: -122.01 };
+    movePoint(course, 0, 1, moved);
+    expect(course.segments[1].points[0], "a gap is the user's own").toEqual(at(5));
+  });
+
+  it("refuses to take out a point two segments meet at", () => {
+    const course = twoSegments();
+    expect(deletePoint(course, 0, 1)).toBe(false);
+    expect(course.segments[0].points).toHaveLength(2);
+  });
+
+  it("refuses a deletion that would leave a segment with nowhere to go", () => {
+    const course = { id: "c", segments: [{ id: "a", mode: "run", points: [at(0), at(1), at(0)], viewable: true }] };
+    expect(deletePoint(course, 0, 1), "the two left over sit on the same spot").toBe(false);
+    expect(course.segments[0].points).toHaveLength(3);
+  });
+
+  it("adds a point between the two it was dropped between", () => {
+    const course = twoSegments();
+    const added = { lat: 45.004, lon: -122 };
+    expect(insertPoint(course, 0, 0, added)).toBe(true);
+    expect(course.segments[0].points[1]).toEqual(added);
+    expect(course.segments[0].points).toHaveLength(3);
   });
 });

@@ -70,6 +70,47 @@ export function redoPoint(course, undone) {
   addPoint(course, undone.latlon);
 }
 
+/**
+ * Puts a drawn point somewhere else, and reports whether it went. Segments that meet do so at a
+ * shared point, so moving one side moves the other; segments parted by a gap keep their gap.
+ */
+export function movePoint(course, segmentIndex, pointIndex, latlon) {
+  const segment = course.segments[segmentIndex];
+  const was = segment?.points[pointIndex];
+  if (!was) return false;
+  const above = course.segments[segmentIndex - 1]?.points;
+  const below = course.segments[segmentIndex + 1]?.points;
+  segment.points[pointIndex] = latlon;
+  if (pointIndex === 0 && above?.length && coincide(above.at(-1), was)) above[above.length - 1] = latlon;
+  if (pointIndex === segment.points.length - 1 && below?.length && coincide(below[0], was)) below[0] = latlon;
+  return true;
+}
+
+/**
+ * Takes a drawn point out, and reports whether it went. A point where two segments meet holds
+ * them together, so it stays; merge the segments to be rid of it.
+ */
+export function deletePoint(course, segmentIndex, pointIndex) {
+  const segment = course.segments[segmentIndex];
+  if (!segment?.points[pointIndex]) return false;
+  const joinsAbove = pointIndex === 0 && segmentIndex > 0;
+  const joinsBelow = pointIndex === segment.points.length - 1 && segmentIndex + 1 < course.segments.length;
+  if (joinsAbove || joinsBelow) return false;
+  const left = segment.points.filter((_, i) => i !== pointIndex);
+  // The engine needs two points that are actually apart, not merely two points.
+  if (!left.some((p) => !coincide(p, left[0]))) return false;
+  segment.points = left;
+  return true;
+}
+
+/** Adds a drawn point just after `pointIndex`, where a click on the line between two points lands. */
+export function insertPoint(course, segmentIndex, pointIndex, latlon) {
+  const segment = course.segments[segmentIndex];
+  if (!segment?.points[pointIndex]) return false;
+  segment.points.splice(pointIndex + 1, 0, latlon);
+  return true;
+}
+
 export function removeCourse(event, course) {
   event.courses = event.courses.filter((c) => c !== course);
   event.racers = event.racers.filter((r) => r.course_id !== course.id);

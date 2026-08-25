@@ -109,6 +109,19 @@ export function arrivalsAt(event, course, metres) {
     .sort((a, b) => a.expected - b.expected);
 }
 
+/** The drawn point of `course` nearest `latlon`, which is what a move takes hold of. */
+export function nearestVertex(course, latlon) {
+  const kx = Math.cos((latlon.lat * Math.PI) / 180);
+  let best = null;
+  course.segments.forEach((segment, segmentIndex) => {
+    segment.points.forEach((point, pointIndex) => {
+      const d2 = ((point.lon - latlon.lon) * kx) ** 2 + (point.lat - latlon.lat) ** 2;
+      if (!best || d2 < best.d2) best = { d2, metres: Math.sqrt(d2) * 111195, segmentIndex, pointIndex };
+    });
+  });
+  return best;
+}
+
 /** Nearest point on any course to `latlon`, in a flat approximation good enough for picking. */
 export function nearestOnCourses(event, latlon) {
   return nearestOnEachCourse(event, latlon).reduce((best, hit) => (!best || hit.d2 < best.d2 ? hit : best), null);

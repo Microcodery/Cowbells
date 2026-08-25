@@ -4,6 +4,7 @@ import { DEBUG_DEFAULTS } from "./debug.js";
 import { DEFAULT_SPEED_MPS, averagePace, segmentBoundaries } from "./event.js";
 import { clock, distanceLabel, paceLabel, speedLabel } from "./format.js";
 import { courseLength, polylineLength } from "./geo.js";
+import { COURSE_COLORS } from "./map.js";
 import { planSummary, stopLabel } from "./plans.js";
 
 const MODES = ["run", "bike", "swim", "other"];
@@ -138,6 +139,27 @@ export function renderHoverTip(root, hovered, unit) {
     .join("");
 }
 
+/**
+ * What a click on the course being edited offers: a point can be moved or taken out, and the
+ * line between points can take a new one. Snapping is remembered here but not yet applied.
+ */
+export function renderMapMenu(root, menu, ui, actions) {
+  root.hidden = !menu;
+  if (!menu) return;
+  const snap = (field, on, label) =>
+    `<label title="Snapping is not built yet">${label} ${toggle(field, on, "disabled")}</label>`;
+  root.setAttribute("aria-label", menu.kind === "point" ? "This point" : "This stretch of the course");
+  root.innerHTML =
+    menu.kind === "point"
+      ? `<button data-act="movePoint">${ui.held ? "Click where it goes" : "Move"}</button>
+         <button data-act="deletePoint">Delete</button>`
+      : `<button data-act="addPointHere">Add point</button>
+         ${snap("snapRoads", ui.snap.roads, "snap to roads")}
+         ${snap("snapPaths", ui.snap.paths, "snap to paths")}`;
+  bindActions(root, actions);
+  root.querySelector("button")?.focus({ preventScroll: true });
+}
+
 /** Clicks and changes inside `root` dispatch to `actions` by their `data-act` / `data-field`. */
 function bindActions(root, actions) {
   root.onclick = (e) => {
@@ -256,7 +278,7 @@ function coursesSection(event, ui) {
     </div>
     ${event.courses
       .map(
-        (course, ci) => `<div class="card">
+        (course, ci) => `<div class="card course" style="border-left-color: ${COURSE_COLORS[ci % COURSE_COLORS.length]}">
       <div class="row">
         <input data-field="courseName" data-ci="${ci}" value="${esc(course.name)}" aria-label="Course name">
         <button data-act="removeCourse" data-ci="${ci}" title="Remove course" aria-label="Remove course">${TRASH}</button>

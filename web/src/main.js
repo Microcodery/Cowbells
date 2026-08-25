@@ -12,7 +12,10 @@ import {
   assignCourse,
   looksLikeEvent,
   mergeInterval,
+  deletePoint,
+  insertPoint,
   mergeWithNext,
+  movePoint,
   moveSegmentBoundary,
   movePaceBoundary,
   newEvent,
@@ -26,18 +29,19 @@ import {
 } from "./event.js";
 import { UNITS, laterThan, parsePace, todayAt, withClock } from "./format.js";
 import { invalidatePlan, planGeneration } from "./generation.js";
-import { arrivalsAt, distanceAlong, largestCourse, nearestOnCourses, nearestOnEachCourse } from "./geo.js";
+import { arrivalsAt, distanceAlong, largestCourse, nearestOnCourses, nearestOnEachCourse, nearestVertex } from "./geo.js";
 import { itineraryToGpx } from "./gpx.js";
 import { createMap, currentTheme, fitTo, flyTo, mapCenter, render as renderMap, replayCanvas, revealItinerary, setHover, setTheme } from "./map.js";
 import { createMapData } from "./mapdata.js";
 import { overlay } from "./overlay.js";
-import { closeDialog, openDialog, renderHeader, renderHoverTip, renderPanel, setStatus } from "./panel.js";
+import { closeDialog, openDialog, renderHeader, renderHoverTip, renderMapMenu, renderPanel, setStatus } from "./panel.js";
 import { planSummary } from "./plans.js";
 import { liveReplay } from "./replay.js";
 
 const EVENT_KEY = "cowbells.event";
 const UNITS_KEY = "cowbells.units";
 const DEBUG_KEY = "cowbells.debug";
+const SNAP_KEY = "cowbells.snap";
 const DEFAULT_CENTER = { lat: 45.5231, lon: -122.6765 };
 const AUTOSAVE_DELAY_MS = 500;
 
@@ -58,8 +62,14 @@ const ui = {
   alternatives: null,
   // Points taken back per course, newest last, so drawing can be walked backwards and forwards.
   undone: {},
-  // The course whose shape is open for editing; the drawing tools belong to it alone.
+  // The course whose shape is open for editing; its points are the ones the map offers.
   editing: null,
+  // What the map is asking about: a point of the course, or the line between two of them.
+  menu: null,
+  // The point a move has taken hold of, waiting to be put down.
+  held: null,
+  // Where a new or moved point may land. Remembered now; snapping itself is still to come.
+  snap: loadSnap(),
 };
 
 /** The course's stack of taken-back points, started on first use. */
@@ -69,9 +79,15 @@ let autosave;
 /** The spot on a course the hover tip points at, so the tip rides along when the map moves. */
 let hoverAnchor = null;
 
+const editingIndex = () => {
+  const index = event.courses.findIndex((c) => c.id === ui.editing);
+  return index === -1 ? null : index;
+};
+
 const header = document.getElementById("top");
 const panel = document.getElementById("panel");
 const hoverTip = document.getElementById("hover");
+const mapMenu = document.getElementById("mapmenu");
 const mapStatus = document.getElementById("mapstatus");
 const scan = document.getElementById("scan");
 const map = createMap("map", event.origin, onMapClick, onMapHover);
@@ -88,12 +104,22 @@ const mapdata = createMapData({
 map.on("layers-ready", render);
 map.once("layers-ready", () => mapdata.restore());
 map.on("move", placeHoverTip);
+map.on("move", placeMapMenu);
+document.addEventListener("keydown", (e) => e.key === "Escape" && closeMapMenu());
 window.cowbells = { map, event: () => event };
 
 /** A preference chosen on an earlier visit, or `fallback` when it is missing or no longer offered. */
 function storedChoice(key, table, fallback) {
   const stored = localStorage.getItem(key);
   return stored in table ? stored : fallback;
+}
+
+function loadSnap() {
+  try {
+    return { roads: true, paths: true, ...JSON.parse(localStorage.getItem(SNAP_KEY) ?? "{}") };
+  } catch {
+    return { roads: true, paths: true };
+  }
 }
 
 function loadDebug() {
@@ -118,7 +144,9 @@ function render() {
   renderPanel(panel, event, ui, actions);
   mapStatus.textContent = ui.status;
   mapStatus.hidden = !ui.status;
-  renderMap(map, event, ui.itinerary, ui.tool?.courseIndex ?? null);
+  renderMap(map, event, ui.itinerary, editingIndex());
+  renderMapMenu(mapMenu, ui.menu, ui, actions);
+  placeMapMenu();
   clearTimeout(autosave);
   autosave = setTimeout(() => localStorage.setItem(EVENT_KEY, JSON.stringify(event)), AUTOSAVE_DELAY_MS);
 }
@@ -133,6 +161,8 @@ function narrate(text) {
 /** Apply an edit to the event; any plan, and any search for alternatives to it, is stale afterwards. */
 function mutate(edit) {
   edit();
+  ui.menu = null;
+  ui.held = null;
   reconcileProfiles(event);
   ui.itinerary = null;
   invalidatePlan();
@@ -179,13 +209,15 @@ const closePanelOnPhones = () => matchMedia("(max-width: 700px)").matches && doc
 
 function toggleTool(kind, courseIndex) {
   const same = ui.tool?.kind === kind && ui.tool.courseIndex === courseIndex;
+  Object.assign(ui, { menu: null, held: null });
   ui.tool = same ? null : { kind, courseIndex };
   render();
 }
 
 function onMapClick(latlon, metresPerPixel) {
   const tool = ui.tool;
-  // With no tool active a tap is a hover: phones have no pointer to hover with.
+  if (!tool && ui.editing) return onEditClick(latlon, metresPerPixel);
+  // Off the course being edited, with no tool active, a tap is a hover: phones cannot hover.
   if (!tool) return onMapHover(latlon, metresPerPixel);
   mutate(() => {
     if (tool.kind === "draw") {
@@ -207,9 +239,76 @@ function onMapClick(latlon, metresPerPixel) {
   });
 }
 
+/**
+ * While a course is open for editing, the map answers clicks about its shape: a point offers to
+ * move or go, the line between points offers a new one, and anywhere else puts the question away.
+ */
+/**
+ * Runs a reshaping of the course being edited on what the menu points at. An edit the course
+ * refuses changes nothing, so the plan it already has survives it.
+ */
+function reshape(edit) {
+  const course = event.courses[editingIndex()];
+  const menu = ui.menu;
+  ui.menu = null;
+  if (!course || !menu) return render();
+  const changed = edit(course, menu);
+  // Drawing has moved on, so points taken back before it can no longer be put back.
+  if (changed) ui.undone[course.id] = [];
+  return changed ? mutate(() => {}) : render();
+}
+
+function closeMapMenu() {
+  if (!ui.menu && !ui.held) return;
+  ui.menu = null;
+  ui.held = null;
+  render();
+}
+
+function onEditClick(latlon, metresPerPixel) {
+  const index = editingIndex();
+  const course = event.courses[index];
+  if (!course) return;
+  const held = ui.held;
+  if (held) {
+    Object.assign(ui, { held: null, menu: null });
+    if (movePoint(course, held.segmentIndex, held.pointIndex, latlon)) return mutate(() => {});
+    return render();
+  }
+  const reach = ui.debug.hoverPx * metresPerPixel;
+  const vertex = nearestVertex(course, latlon);
+  if (vertex && vertex.metres <= reach) {
+    const { segmentIndex, pointIndex } = vertex;
+    ui.menu = { kind: "point", at: course.segments[segmentIndex].points[pointIndex], segmentIndex, pointIndex };
+  } else {
+    const hit = nearestOnEachCourse(event, latlon).find((h) => h.courseIndex === index);
+    const { segmentIndex, pointIndex, latlon: on } = hit ?? {};
+    ui.menu = hit && hit.metres <= reach ? { kind: "line", at: on, segmentIndex, pointIndex } : null;
+  }
+  render();
+}
+
+/**
+ * Keeps the menu on the spot it was opened at as the map moves under it, and inside the map:
+ * it sits above the spot unless the top is in the way, and never past a side or the header.
+ */
+function placeMapMenu() {
+  if (!ui.menu) return;
+  const at = map.project([ui.menu.at.lon, ui.menu.at.lat]);
+  const menu = mapMenu.getBoundingClientRect();
+  const within = map.getContainer().getBoundingClientRect();
+  const margin = 8;
+  const ceiling = Math.max(header.getBoundingClientRect().bottom - within.top, 0) + margin;
+  const above = at.y - menu.height - 10;
+  const half = menu.width / 2;
+  mapMenu.style.left = `${Math.min(Math.max(at.x, half + margin), within.width - half - margin)}px`;
+  mapMenu.style.top = `${above < ceiling ? at.y + 14 : above}px`;
+}
+
 /** Hovering a course marks the spot and lists when each racer on it should pass. */
 function onMapHover(latlon, metresPerPixel) {
-  const hits = latlon ? nearestOnEachCourse(event, latlon).filter((h) => h.metres <= ui.debug.hoverPx * metresPerPixel) : [];
+  // Editing asks about the shape, not the racers; arrival times would only crowd the menu.
+  const hits = latlon && !ui.editing ? nearestOnEachCourse(event, latlon).filter((h) => h.metres <= ui.debug.hoverPx * metresPerPixel) : [];
   if (!hits.length) {
     hoverAnchor = null;
     setHover(map, null);
@@ -256,7 +355,9 @@ const actions = {
   editCourse({ ci }) {
     const course = event.courses[ci];
     ui.editing = ui.editing === course.id ? null : course.id;
-    ui.tool = null;
+    Object.assign(ui, { tool: null, menu: null, held: null });
+    setHover(map, null);
+    hoverTip.hidden = true;
     render();
   },
   removeCourse({ ci }) {
@@ -285,6 +386,17 @@ const actions = {
   },
   split({ ci }) {
     toggleTool("split", Number(ci));
+  },
+  movePoint() {
+    const { segmentIndex, pointIndex } = ui.menu;
+    ui.held = { segmentIndex, pointIndex };
+    render();
+  },
+  deletePoint() {
+    reshape((course, { segmentIndex, pointIndex }) => deletePoint(course, segmentIndex, pointIndex));
+  },
+  addPointHere() {
+    reshape((course, { segmentIndex, pointIndex, at }) => insertPoint(course, segmentIndex, pointIndex, at));
   },
   merge({ ci, si }) {
     mutate(() => mergeWithNext(event.courses[ci], Number(si)));
@@ -391,7 +503,7 @@ const actions = {
     if (!confirm("Start over? This clears the courses, racers, settings, and fetched map data.")) return;
     event = newEvent(mapCenter(map));
     mapdata.clear();
-    Object.assign(ui, { itinerary: null, alternatives: null, tool: null, undone: {}, editing: null, status: "Draw a course to begin." });
+    Object.assign(ui, { itinerary: null, alternatives: null, tool: null, undone: {}, editing: null, menu: null, held: null, status: "Draw a course to begin." });
     localStorage.removeItem(EVENT_KEY);
     invalidatePlan();
     render();
@@ -460,6 +572,11 @@ const actions = {
   edit({ field, ci, si, ri, ii, gi, key }, input) {
     const number = Number(input.value);
     // Debug tunables touch feel, not the event: the plan stays valid.
+    if (field === "snapRoads" || field === "snapPaths") {
+      ui.snap[field === "snapRoads" ? "roads" : "paths"] = input.checked;
+      localStorage.setItem(SNAP_KEY, JSON.stringify(ui.snap));
+      return;
+    }
     if (field === "debug") {
       ui.debug[key] = number;
       localStorage.setItem(DEBUG_KEY, JSON.stringify(ui.debug));

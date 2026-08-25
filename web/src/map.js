@@ -21,7 +21,8 @@ const THEME_KEY = "cowbells.theme";
 const storedTheme = localStorage.getItem(THEME_KEY);
 if (storedTheme in STYLES) document.documentElement.dataset.theme = storedTheme;
 
-const COURSE_COLORS = ["#4078f2", "#e45649", "#50a14f", "#c18401", "#0184bc", "#986801", "#e06c75", "#5c6370"];
+/** The colours courses are drawn in, in order; the panel marks each card with its own. */
+export const COURSE_COLORS = ["#4078f2", "#e45649", "#50a14f", "#c18401", "#0184bc", "#986801", "#e06c75", "#5c6370"];
 
 const SOURCES = [
   "courses",
@@ -174,13 +175,14 @@ export function metresPerPixel(map) {
   return (156543.03 * Math.cos((lat * Math.PI) / 180)) / 2 ** map.getZoom();
 }
 
-/** Redraw every overlay from the event and the latest itinerary; vertices only for the course being edited. */
+/** Redraw every overlay; editing a course shows its points and leaves the other courses out of the way. */
 export function render(map, event, itinerary, editingCourse = null) {
   if (!map.getSource("courses")) return;
   const courses = [];
   const vertices = [];
   const shapes = [];
   event.courses.forEach((course, i) => {
+    if (editingCourse !== null && i !== editingCourse) return;
     const color = COURSE_COLORS[i % COURSE_COLORS.length];
     shapes.push({ points: course.segments.flatMap((s) => s.points), color });
     course.segments.forEach((segment) => {
