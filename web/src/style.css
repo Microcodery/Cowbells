@@ -185,13 +185,26 @@ body {
   flex: 0 1 auto;
   min-width: 0;
   font-weight: 700;
-  border-color: transparent;
-  background: transparent;
   padding: 2px 6px;
 }
 
+/* A value you can type over, showing its edges only when you reach for it. */
+.quiet,
+.rename {
+  border-color: transparent;
+  background: transparent;
+}
+
+.quiet:hover,
 .rename:hover {
   border-color: var(--border);
+}
+
+.ladder .mark .quiet {
+  width: 4.2em;
+  padding: 1px 4px;
+  min-height: 0;
+  color: var(--muted);
 }
 
 .card > summary > .muted {

@@ -15,6 +15,41 @@ function haversineM(a, b) {
   return 2 * 6371008.8 * Math.asin(Math.sqrt(h));
 }
 
+/**
+ * Cuts a polyline at each distance in `cuts` (ascending, in metres), interpolating a point at
+ * every cut so the pieces join exactly where they were parted. Cuts outside the line are pulled
+ * onto it, so a cut on an end yields a piece of no length rather than none at all.
+ */
+export function cutPolyline(points, cuts) {
+  if (points.length < 2) return [points, ...cuts.map(() => points.slice())];
+  const total = polylineLength(points);
+  const within = cuts.map((cut) => Math.min(Math.max(cut, 0), total));
+  const pieces = [];
+  let piece = points.slice(0, 1);
+  let along = 0;
+  let next = 0;
+  for (let i = 1; i < points.length; i++) {
+    const step = haversineM(points[i - 1], points[i]);
+    // A step of no length has no fraction to cut at; the cut waits for one that has.
+    while (next < within.length && step > 0 && within[next] <= along + step) {
+      const at = between(points[i - 1], points[i], (within[next] - along) / step);
+      piece.push(at);
+      pieces.push(piece);
+      piece = [at];
+      next++;
+    }
+    along += step;
+    piece.push(points[i]);
+  }
+  pieces.push(piece);
+  return pieces;
+}
+
+const between = (a, b, fraction) => ({
+  lat: a.lat + (b.lat - a.lat) * fraction,
+  lon: a.lon + (b.lon - a.lon) * fraction,
+});
+
 export function courseLength(course) {
   return course.segments.reduce((sum, s) => sum + polylineLength(s.points), 0);
 }

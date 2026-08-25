@@ -1,7 +1,7 @@
 // The event document (mirrors the Rust model) plus the edits the panel makes to it.
 
 import { todayAt } from "./format.js";
-import { courseLength, polylineLength } from "./geo.js";
+import { courseLength, cutPolyline, polylineLength } from "./geo.js";
 
 const DEFAULT_PACE_S_PER_KM = { run: 360, bike: 100, swim: 1200, other: 360 };
 const DEFAULT_UNCERTAINTY = 0.05;
@@ -55,11 +55,19 @@ export function addPoint(course, latlon) {
   course.segments.at(-1).points.push(latlon);
 }
 
+/** Takes back the last point drawn, and reports what it took so it can be put back. */
 export function undoPoint(course) {
   const last = course.segments.at(-1);
-  if (!last) return;
-  last.points.pop();
-  if (last.points.length === 0 && course.segments.length > 1) course.segments.pop();
+  const latlon = last?.points.pop();
+  if (!latlon) return null;
+  const emptied = last.points.length === 0 && course.segments.length > 1;
+  return { latlon, segment: emptied ? course.segments.pop() : null };
+}
+
+/** Puts back what `undoPoint` took, segment and all. */
+export function redoPoint(course, undone) {
+  if (undone.segment) course.segments.push(undone.segment);
+  addPoint(course, undone.latlon);
 }
 
 export function removeCourse(event, course) {
@@ -82,6 +90,42 @@ export function mergeWithNext(course, segmentIndex) {
   a.points = a.points.concat(b.points.slice(1));
   course.segments.splice(segmentIndex + 1, 1);
 }
+
+/** Where each segment ends, measured along the course, with 0 and the finish included. */
+export function segmentBoundaries(course) {
+  let along = 0;
+  return [0, ...course.segments.map((segment) => (along += polylineLength(segment.points)))];
+}
+
+/** Segments and legs keep at least this much length, so neither collapses to nothing. */
+const SHORTEST_M = 1;
+
+const clamp = (value, low, high) => Math.min(Math.max(value, low), high);
+
+/**
+ * Moves where segment `index` gives way to the next, re-cutting only that pair. A course whose
+ * segments do not meet keeps its gap: re-cutting across one would silently swallow it.
+ */
+export function moveSegmentBoundary(course, index, metres) {
+  const [before, after] = [course.segments[index], course.segments[index + 1]];
+  if (!after || !coincide(before?.points.at(-1), after.points[0])) return;
+  const boundaries = segmentBoundaries(course);
+  // Boundaries lead with the start line, so the pair runs from the mark at `index` to the one two on.
+  const [low, high] = [boundaries[index], boundaries[index + 2]];
+  if (high - low < 2 * SHORTEST_M) return;
+  const pair = before.points.concat(after.points.slice(1));
+  // The old boundary was cut into the line and adds nothing to it; drop it so nudging cannot pile up.
+  const join = before.points.length - 1;
+  if (addsNoLength(pair[join - 1], pair[join], pair[join + 1])) pair.splice(join, 1);
+  const at = clamp(metres, low + SHORTEST_M, high - SHORTEST_M) - low;
+  const [head, tail] = cutPolyline(pair, [at]);
+  before.points = head;
+  after.points = tail;
+}
+
+const addsNoLength = (a, p, b) => a && b && polylineLength([a, p, b]) - polylineLength([a, b]) < 0.05;
+
+const coincide = (a, b) => a && b && Math.abs(a.lat - b.lat) < 1e-7 && Math.abs(a.lon - b.lon) < 1e-7;
 
 export function addRacer(event, course) {
   const racer = {
@@ -140,6 +184,15 @@ export function averagePace(racer) {
   const distance = legs.reduce((total, leg) => total + (leg.end_m - leg.start_m), 0);
   if (distance <= 0) return legs[0]?.seconds_per_km ?? 0;
   return legs.reduce((seconds, leg) => seconds + (leg.end_m - leg.start_m) * leg.seconds_per_km, 0) / distance;
+}
+
+/** Moves where one leg gives way to the next; the boundary stays between its neighbours. */
+export function movePaceBoundary(racer, index, metres) {
+  const [a, b] = [racer.pace_profile[index], racer.pace_profile[index + 1]];
+  if (!b || b.end_m - a.start_m < 2 * SHORTEST_M) return;
+  const at = clamp(metres, a.start_m + SHORTEST_M, b.end_m - SHORTEST_M);
+  a.end_m = at;
+  b.start_m = at;
 }
 
 export function splitInterval(racer, index, atM) {

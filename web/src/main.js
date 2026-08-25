@@ -13,12 +13,15 @@ import {
   looksLikeEvent,
   mergeInterval,
   mergeWithNext,
+  moveSegmentBoundary,
+  movePaceBoundary,
   newEvent,
   rebase,
   reconcileProfiles,
   removeCourse,
   splitInterval,
   splitSegment,
+  redoPoint,
   undoPoint,
 } from "./event.js";
 import { UNITS, laterThan, parsePace, todayAt, withClock } from "./format.js";
@@ -53,7 +56,14 @@ const ui = {
   debug: loadDebug(),
   // `null` while alternatives are still being explored; then the ones that beat the plan.
   alternatives: null,
+  // Points taken back per course, newest last, so drawing can be walked backwards and forwards.
+  undone: {},
+  // The course whose shape is open for editing; the drawing tools belong to it alone.
+  editing: null,
 };
+
+/** The course's stack of taken-back points, started on first use. */
+const undoneFor = (course) => (ui.undone[course.id] ??= []);
 let event = loadSaved() ?? newEvent(DEFAULT_CENTER);
 let autosave;
 /** The spot on a course the hover tip points at, so the tip rides along when the map moves. */
@@ -151,6 +161,8 @@ async function adoptEvent(loaded, osm, loadedMessage) {
   event = loaded;
   ui.itinerary = null;
   ui.alternatives = null;
+  // The old event's editing state means nothing to this one, and its courses may not even exist.
+  Object.assign(ui, { tool: null, editing: null, undone: {} });
   showCourses();
   ui.status = (await mapdata.adopt(osm)) ?? loadedMessage;
 }
@@ -176,7 +188,12 @@ function onMapClick(latlon, metresPerPixel) {
   // With no tool active a tap is a hover: phones have no pointer to hover with.
   if (!tool) return onMapHover(latlon, metresPerPixel);
   mutate(() => {
-    if (tool.kind === "draw") addPoint(event.courses[tool.courseIndex], latlon);
+    if (tool.kind === "draw") {
+      const course = event.courses[tool.courseIndex];
+      addPoint(course, latlon);
+      // A fresh point is a new branch: what was taken back before it can no longer be put back.
+      ui.undone[course.id] = [];
+    }
     if (tool.kind === "start") event.spectator.start = latlon;
     if (tool.kind === "end") event.spectator.end = { location: latlon, latest: event.spectator.earliest + 4 * 3600 };
     if (tool.kind === "region") addRegion(event, latlon);
@@ -232,10 +249,20 @@ function download(filename, text, type) {
 const actions = {
   addCourse() {
     mutate(() => addCourse(event));
+    ui.editing = event.courses.at(-1).id;
     ui.tool = { kind: "draw", courseIndex: event.courses.length - 1 };
     render();
   },
+  editCourse({ ci }) {
+    const course = event.courses[ci];
+    ui.editing = ui.editing === course.id ? null : course.id;
+    ui.tool = null;
+    render();
+  },
   removeCourse({ ci }) {
+    const { id } = event.courses[ci];
+    delete ui.undone[id];
+    if (ui.editing === id) ui.editing = null;
     mutate(() => {
       removeCourse(event, event.courses[ci]);
       ui.tool = null;
@@ -245,7 +272,16 @@ const actions = {
     toggleTool("draw", Number(ci));
   },
   undo({ ci }) {
-    mutate(() => undoPoint(event.courses[ci]));
+    const course = event.courses[ci];
+    mutate(() => {
+      const undone = undoPoint(course);
+      if (undone) undoneFor(course).push(undone);
+    });
+  },
+  redo({ ci }) {
+    const course = event.courses[ci];
+    const undone = undoneFor(course).pop();
+    if (undone) mutate(() => redoPoint(course, undone));
   },
   split({ ci }) {
     toggleTool("split", Number(ci));
@@ -355,7 +391,7 @@ const actions = {
     if (!confirm("Start over? This clears the courses, racers, settings, and fetched map data.")) return;
     event = newEvent(mapCenter(map));
     mapdata.clear();
-    Object.assign(ui, { itinerary: null, alternatives: null, tool: null, status: "Draw a course to begin." });
+    Object.assign(ui, { itinerary: null, alternatives: null, tool: null, undone: {}, editing: null, status: "Draw a course to begin." });
     localStorage.removeItem(EVENT_KEY);
     invalidatePlan();
     render();
@@ -443,12 +479,15 @@ const actions = {
       courseName: () => (course.name = input.value),
       courseStart: () => (course.start_time = withClock(course.start_time, input.value)),
       segmentMode: () => (course.segments[si].mode = input.value),
+      segmentStart: () => moveSegmentBoundary(course, Number(si) - 1, number / ui.unit.perMetre),
+      segmentEnd: () => moveSegmentBoundary(course, Number(si), number / ui.unit.perMetre),
       viewable: () => (course.segments[si].viewable = input.checked),
       racerName: () => (racer.name = input.value),
       racerCourse: () => assignCourse(racer, event.courses.find((c) => c.id === input.value)),
       racerOffset: () => (racer.start_offset_s = number * 60),
       racerPriority: () => (racer.priority = number),
       racerPrefer: () => (racer.prefer = input.value),
+      paceBoundary: () => movePaceBoundary(racer, Number(ii), number / ui.unit.perMetre),
       pace: () => (racer.pace_profile[ii].seconds_per_km = parsePace(input.value, ui.unit) ?? racer.pace_profile[ii].seconds_per_km),
       uncertainty: () => (racer.pace_profile[ii].uncertainty = number / 100),
       earliest: () => (s.earliest = withClock(s.earliest, input.value)),

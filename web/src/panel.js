@@ -1,7 +1,7 @@
 // The header and side panel: the event drawn as forms, and every control wired to an action.
 
 import { DEBUG_DEFAULTS } from "./debug.js";
-import { DEFAULT_SPEED_MPS, averagePace } from "./event.js";
+import { DEFAULT_SPEED_MPS, averagePace, segmentBoundaries } from "./event.js";
 import { clock, distanceLabel, paceLabel, speedLabel } from "./format.js";
 import { courseLength, polylineLength } from "./geo.js";
 import { planSummary, stopLabel } from "./plans.js";
@@ -265,11 +265,7 @@ function coursesSection(event, ui) {
         <label>starts <input type="time" data-field="courseStart" data-ci="${ci}" value="${clock(course.start_time)}"></label>
         <label>length <span class="muted">${distanceLabel(courseLength(course), ui.unit)}</span></label>
       </div>
-      <div class="row">
-        ${toolButton("draw", tool("draw", ci), "Draw", "Drawing… (click map)", `data-ci="${ci}"`)}
-        <button data-act="undo" data-ci="${ci}">Undo point</button>
-        ${toolButton("split", tool("split", ci), "Split", "Click the course", `data-ci="${ci}"`)}
-      </div>
+      ${courseTools(course, ci, ui)}
       ${segmentsSection(course, ci, ui)}
     </div>`,
       )
@@ -277,14 +273,42 @@ function coursesSection(event, ui) {
   </details>`;
 }
 
+/** The buttons that reshape a course, offered only once its shape is open for editing. */
+function courseTools(course, ci, ui) {
+  if (ui.editing !== course.id) {
+    return `<div class="row"><button data-act="editCourse" data-ci="${ci}">Edit course</button></div>`;
+  }
+  const tool = (kind) => ui.tool?.kind === kind && ui.tool.courseIndex === ci;
+  return `<div class="row">
+    ${toolButton("draw", tool("draw"), "Draw", "Drawing… (click map)", `data-ci="${ci}"`)}
+    <button data-act="undo" data-ci="${ci}">Undo point</button>
+    <button data-act="redo" data-ci="${ci}" ${ui.undone[course.id]?.length ? "" : "disabled"}>Redo point</button>
+    ${toolButton("split", tool("split"), "Split", "Click the course", `data-ci="${ci}"`)}
+    <button data-act="editCourse" data-ci="${ci}" class="active">Done</button>
+  </div>`;
+}
+
 /** The stretches a course is built from, folded down to how many and how detailed they are. */
 function segmentsSection(course, ci, ui) {
+  const bounds = segmentBoundaries(course);
+  const last = course.segments.length - 1;
+  const edge = (label, field, si, metres, fixed) =>
+    `<label>${label} <span><input type="number" data-field="${field}" data-ci="${ci}" data-si="${si}" value="${(metres * ui.unit.perMetre).toFixed(2)}" min="0" step="0.1" size="5" ${fixed ? "disabled" : ""}> ${ui.unit.label}</span></label>`;
   const segment = (s, si) => `<li>
-      <span class="muted">${si + 1}</span>
-      <select data-field="segmentMode" data-ci="${ci}" data-si="${si}">${options(MODES, s.mode)}</select>
-      <label title="Can spectators watch this stretch?">${toggle("viewable", s.viewable, `data-ci="${ci}" data-si="${si}"`)} viewable</label>
-      <span class="muted">${distanceLabel(polylineLength(s.points), ui.unit, 1)}</span>
-      ${si + 1 < course.segments.length ? `<button data-act="merge" data-ci="${ci}" data-si="${si}">merge ↓</button>` : ""}
+      <div class="row">
+        <span class="muted">${si + 1}</span>
+        <select data-field="segmentMode" data-ci="${ci}" data-si="${si}">${options(MODES, s.mode)}</select>
+        <label title="Can spectators watch this stretch?">${toggle("viewable", s.viewable, `data-ci="${ci}" data-si="${si}"`)} viewable</label>
+        <span class="muted">${distanceLabel(polylineLength(s.points), ui.unit, 1)}</span>
+        ${si + 1 < course.segments.length ? `<button data-act="merge" data-ci="${ci}" data-si="${si}">merge ↓</button>` : ""}
+      </div>
+      ${advanced(
+        `course-${course.id}-segment-${si}`,
+        `<div class="fields">
+          ${edge("from", "segmentStart", si, bounds[si], si === 0)}
+          ${edge("to", "segmentEnd", si, bounds[si + 1], si === last)}
+        </div>`,
+      )}
     </li>`;
   return `<details class="foldout" data-section="course-${course.id}-segments">
     <summary>
@@ -356,9 +380,14 @@ function paceLadder(racer, ri, event, ui) {
   const at = (metres) => (metres === 0 ? "0" : distanceLabel(metres, ui.unit, 1));
   // Every leg holds identical controls, so each names the stretch it covers to tell them apart.
   const over = ({ start_m, end_m }) => ` from ${at(start_m)} to ${at(end_m)}`;
+  // Only the marks between two legs can move; the start and the finish are where the course says.
   const mark = (metres, mergeIndex) => `<div class="mark">
-      <span>${at(metres)}</span>
-      ${mergeIndex === null ? "" : `<button data-act="mergeInterval" data-ri="${ri}" data-ii="${mergeIndex}" title="Merge the legs meeting at ${at(metres)}" aria-label="Merge the legs meeting at ${at(metres)}">merge</button>`}
+      ${
+        mergeIndex === null
+          ? `<span>${at(metres)}</span>`
+          : `<span><input class="quiet" type="number" data-field="paceBoundary" data-ri="${ri}" data-ii="${mergeIndex}" value="${(metres * ui.unit.perMetre).toFixed(2)}" min="0" step="0.1" size="5" aria-label="Where the leg above ends"> ${ui.unit.label}</span>
+      <button data-act="mergeInterval" data-ri="${ri}" data-ii="${mergeIndex}" title="Merge the legs meeting at ${at(metres)}" aria-label="Merge the legs meeting at ${at(metres)}">merge</button>`
+      }
     </div>`;
   const leg = (interval, ii) => `<div class="leg">
       ${paceInput(racer, ri, ii, ui, over(interval))}<span class="muted">/${ui.unit.label}</span>
