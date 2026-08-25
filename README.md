@@ -73,6 +73,13 @@ mode, line-of-sight, elevation. See [afx/SPEC.md](afx/SPEC.md).
 - [afx/PLAN.md](afx/PLAN.md) — implementation plan
 - [afx/RESEARCH.md](afx/RESEARCH.md) — prior art and stack research
 
+## Deployments
+
+`main` is published at [cowbells.app](https://cowbells.app) and `dev`, the
+tester channel, at [cowbells.app/dev](https://cowbells.app/dev). A push to
+either branch rebuilds both. They share an origin, so a saved event carries
+between them: reset the event if the two disagree about its shape.
+
 ## Development
 
 Requires Rust ≥ 1.85 with the `wasm32-unknown-unknown` standard library,
