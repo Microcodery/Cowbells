@@ -149,6 +149,84 @@ body {
 
 .card > summary {
   cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* A closed card shows its name; an open one offers the field, so a click means open, then rename. */
+.card > summary > .name {
+  font-weight: 700;
+  padding: 2px 6px;
+}
+
+.card > summary > .rename {
+  display: none;
+}
+
+.card[open] > summary > .name {
+  display: none;
+}
+
+.card[open] > summary > .rename {
+  display: inline-block;
+}
+
+/* Nothing to remove until you have opened what you would be removing. */
+.card > summary > button {
+  display: none;
+}
+
+.card[open] > summary > button {
+  display: inline-block;
+}
+
+.rename {
+  flex: 0 1 auto;
+  min-width: 0;
+  font-weight: 700;
+  border-color: transparent;
+  background: transparent;
+  padding: 2px 6px;
+}
+
+.rename:hover {
+  border-color: var(--border);
+}
+
+.card > summary > .muted {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A field that opens: the value on the right, the detail underneath. */
+details.foldout > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  cursor: pointer;
+  list-style: none;
+  min-height: 28px;
+}
+
+details.foldout > summary::-webkit-details-marker {
+  display: none;
+}
+
+.caret {
+  width: 0.9em;
+  height: 0.9em;
+  color: var(--muted);
+  transition: transform 120ms ease;
+  vertical-align: -0.1em;
+}
+
+details.foldout[open] > summary .caret {
+  transform: rotate(90deg);
 }
 
 h1 {
@@ -666,7 +744,8 @@ input[type="checkbox"].toggle:checked::after {
   select,
   button,
   .button,
-  details.advanced > summary {
+  details.advanced > summary,
+  details.foldout > summary {
     font-size: 16px;
     min-height: 36px;
   }

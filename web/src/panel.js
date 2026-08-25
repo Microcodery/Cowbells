@@ -1,7 +1,7 @@
 // The header and side panel: the event drawn as forms, and every control wired to an action.
 
 import { DEBUG_DEFAULTS } from "./debug.js";
-import { DEFAULT_SPEED_MPS } from "./event.js";
+import { DEFAULT_SPEED_MPS, averagePace } from "./event.js";
 import { clock, distanceLabel, paceLabel, speedLabel } from "./format.js";
 import { courseLength, polylineLength } from "./geo.js";
 import { planSummary, stopLabel } from "./plans.js";
@@ -21,6 +21,7 @@ function panelState(root) {
     trackTimeEditing(root, state);
     trackGhostDismissal(root);
     trackDialogs(root, state);
+    trackNestedFolds(root);
   }
   return state;
 }
@@ -146,14 +147,24 @@ function bindActions(root, actions) {
     const target = e.target.closest("[data-act]");
     // File inputs and selects act on change, not on the click that opens them.
     if (target && !["INPUT", "SELECT"].includes(target.tagName)) actions[target.dataset.act](target.dataset);
-    // A button in a section heading acts without folding the section.
-    if (target?.closest("summary")) e.preventDefault();
+    // A control in a summary acts without folding the section it heads.
+    if (target?.closest("summary") || (e.target.closest("summary") && e.target.matches("input, select"))) {
+      e.preventDefault();
+    }
   };
   root.onchange = (e) => {
     const { act, field } = e.target.dataset;
     if (act) actions[act](e.target.dataset, e.target);
     else if (field) actions.edit(e.target.dataset, e.target);
   };
+  // A summary folds on Space, so a field inside one has to spell its own spaces out.
+  for (const field of root.querySelectorAll("summary input")) {
+    field.onkeydown = (e) => {
+      if (e.key !== " ") return;
+      e.preventDefault();
+      field.setRangeText(" ", field.selectionStart, field.selectionEnd, "end");
+    };
+  }
 }
 
 /** Chromium reports no active element between a time input's segments, so focus is tracked by its events. */
@@ -168,6 +179,21 @@ function trackTimeEditing(root, state) {
     state.pendingRender = null;
     deferred?.();
   });
+}
+
+/**
+ * Closing a fold closes what is inside it, so reopening shows the same tidy view every time.
+ * `toggle` does not bubble, so the panel listens for it on the way down.
+ */
+function trackNestedFolds(root) {
+  root.addEventListener(
+    "toggle",
+    (e) => {
+      if (e.target.open) return;
+      for (const nested of e.target.querySelectorAll("details")) nested.open = false;
+    },
+    true,
+  );
 }
 
 /** Gestures the dialogs answer to: a file dropped on a drop zone, and a backdrop click to dismiss. */
@@ -247,21 +273,28 @@ function coursesSection(event, ui) {
         <button data-act="undo" data-ci="${ci}">Undo point</button>
         ${toolButton("split", tool("split", ci), "Split", "Click the course", `data-ci="${ci}"`)}
       </div>
-      <ol class="segments">
-        ${course.segments
-          .map(
-            (s, si) => `<li>
-          <select data-field="segmentMode" data-ci="${ci}" data-si="${si}">${options(MODES, s.mode)}</select>
-          <label title="Can spectators watch this stretch?">${toggle("viewable", s.viewable, `data-ci="${ci}" data-si="${si}"`)} viewable</label>
-          <span class="muted">${s.points.length} pts</span>
-          ${si + 1 < course.segments.length ? `<button data-act="merge" data-ci="${ci}" data-si="${si}">merge ↓</button>` : ""}
-        </li>`,
-          )
-          .join("")}
-      </ol>
+      ${segmentsSection(course, ci)}
     </div>`,
       )
       .join("")}
+  </details>`;
+}
+
+/** The stretches a course is built from, folded down to how many and how detailed they are. */
+function segmentsSection(course, ci) {
+  const points = course.segments.reduce((total, segment) => total + segment.points.length, 0);
+  const segment = (s, si) => `<li>
+      <select data-field="segmentMode" data-ci="${ci}" data-si="${si}">${options(MODES, s.mode)}</select>
+      <label title="Can spectators watch this stretch?">${toggle("viewable", s.viewable, `data-ci="${ci}" data-si="${si}"`)} viewable</label>
+      <span class="muted">${s.points.length} pts</span>
+      ${si + 1 < course.segments.length ? `<button data-act="merge" data-ci="${ci}" data-si="${si}">merge ↓</button>` : ""}
+    </li>`;
+  return `<details class="foldout" data-section="course-${course.id}-segments">
+    <summary>
+      <span>segments ${CARET}</span>
+      <span class="muted">${course.segments.length} · ${points} pts</span>
+    </summary>
+    <ol class="segments">${course.segments.map(segment).join("")}</ol>
   </details>`;
 }
 
@@ -277,27 +310,35 @@ function racersSection(event, ui) {
 function racerCard(racer, ri, event, ui) {
   const course = event.courses.find((c) => c.id === racer.course_id)?.name ?? "";
   return `<details class="card" data-section="racer-${racer.id}" open>
-    <summary><b>${esc(racer.name)}</b> <span class="muted">${esc(course)} · ${paceLabel(racer.pace_profile[0]?.seconds_per_km ?? 0, ui.unit)}/${ui.unit.label}</span></summary>
-    <div class="row">
-      <input data-field="racerName" data-ri="${ri}" value="${esc(racer.name)}" aria-label="Racer name">
+    <summary>
+      <span class="name">${esc(racer.name)}</span>
+      <input class="rename" data-field="racerName" data-ri="${ri}" value="${esc(racer.name)}" aria-label="Racer name">
+      <span class="muted">${esc(course)} · ${paceLabel(averagePace(racer), ui.unit)}/${ui.unit.label}</span>
       <button data-act="removeRacer" data-ri="${ri}" title="Remove racer" aria-label="Remove racer">${TRASH}</button>
-    </div>
+    </summary>
     <div class="fields">
       <label>course <select data-field="racerCourse" data-ri="${ri}">${event.courses.map((c) => `<option value="${c.id}" ${c.id === racer.course_id ? "selected" : ""}>${esc(c.name)}</option>`).join("")}</select></label>
-      ${paceField(racer, ri, ui)}
     </div>
-    ${advanced(`racer-${racer.id}-adv`, racerAdvanced(racer, ri, event, ui))}
+    ${paceSection(racer, ri, event, ui)}
+    ${advanced(`racer-${racer.id}-adv`, racerAdvanced(racer, ri))}
   </details>`;
 }
 
-/** The one pace a racer holds throughout, or a note that their profile has intervals. */
-function paceField(racer, ri, ui) {
-  if (racer.pace_profile.length !== 1) return `<label>pace <span class="muted">${racer.pace_profile.length} intervals ${GEAR}</span></label>`;
-  return `<label>pace <span>${paceInput(racer, ri, 0, ui)} /${ui.unit.label}</span></label>`;
+/** What the racer averages, opening to the legs that make it up. */
+function paceSection(racer, ri, event, ui) {
+  const legs = racer.pace_profile.length;
+  const average = `${paceLabel(averagePace(racer), ui.unit)}/${ui.unit.label}`;
+  return `<details class="foldout" data-section="racer-${racer.id}-pace">
+    <summary>
+      <span>pace ${CARET}</span>
+      <span class="muted">${average}${legs > 1 ? ` over ${legs} legs` : ""}</span>
+    </summary>
+    ${paceLadder(racer, ri, event, ui)}
+  </details>`;
 }
 
-/** How the racer runs: when they start, how much they matter, and their pace profile in full. */
-function racerAdvanced(racer, ri, event, ui) {
+/** How the racer runs: when they start, how much they matter, and which sighting counts. */
+function racerAdvanced(racer, ri) {
   return `<div class="fields">
       <label>start offset <span><input type="number" data-field="racerOffset" data-ri="${ri}" value="${racer.start_offset_s / 60}" step="1" size="4"> min</span></label>
       <label>priority <input type="number" data-field="racerPriority" data-ri="${ri}" value="${racer.priority}" step="0.5" min="0" size="3"></label>
@@ -305,8 +346,7 @@ function racerAdvanced(racer, ri, event, ui) {
         ${options(["finish", "neutral", "en_route"], racer.prefer ?? "finish", { finish: "the finish", neutral: "during, then finish", en_route: "during, always" })}
       </select></label>
       <label title="A plan that misses this finish is worse than any plan that catches it">require their finish ${toggle("racerRequireFinish", racer.require_finish, `data-ri="${ri}"`)}</label>
-    </div>
-    ${paceLadder(racer, ri, event, ui)}`;
+    </div>`;
 }
 
 /**
@@ -348,7 +388,7 @@ function spectatorSection(event, ui) {
   return `<details class="section" data-section="spectator" open>
     <summary><h2>Spectator</h2></summary>
     <div class="fields">
-      <label>out from <input type="time" data-field="earliest" value="${clock(s.earliest)}"></label>
+      <label>start spectating <input type="time" data-field="earliest" value="${clock(s.earliest)}"></label>
       ${s.mode === "drive" ? "" : `<label>${s.mode} speed <span><input type="number" data-field="speed" value="${speedLabel(s.speed_mps ?? DEFAULT_SPEED_MPS[s.mode], ui.unit)}" min="0.5" step="0.5" size="4" title="your pace on ordinary streets"> ${ui.unit.speed}</span></label>`}
     </div>
     ${advanced(
@@ -477,6 +517,8 @@ const toolButton = (act, active, idle, working, extra = "") =>
 /** An on/off field, drawn as a slider rather than a checkbox. */
 const toggle = (field, on, attrs = "") =>
   `<input type="checkbox" class="toggle" data-field="${field}" ${attrs} ${on ? "checked" : ""}>`;
+
+const CARET = `<svg class="caret" viewBox="0 0 16 16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" d="m6 4 4 4-4 4"/></svg>`;
 
 const FLASK = `<svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" d="M6.4 1.8v4L2.8 12a1.3 1.3 0 0 0 1.1 2h8.2a1.3 1.3 0 0 0 1.1-2L9.6 5.8v-4"/><path fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" d="M5.6 1.8h4.8M4.9 10.2h6.2"/></svg>`;
 

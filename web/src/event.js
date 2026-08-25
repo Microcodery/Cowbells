@@ -134,6 +134,14 @@ export function reconcileProfiles(event) {
   }
 }
 
+/** The one pace that would cover the whole profile in the time its legs take together. */
+export function averagePace(racer) {
+  const legs = racer.pace_profile;
+  const distance = legs.reduce((total, leg) => total + (leg.end_m - leg.start_m), 0);
+  if (distance <= 0) return legs[0]?.seconds_per_km ?? 0;
+  return legs.reduce((seconds, leg) => seconds + (leg.end_m - leg.start_m) * leg.seconds_per_km, 0) / distance;
+}
+
 export function splitInterval(racer, index, atM) {
   const interval = racer.pace_profile[index];
   if (!(atM > interval.start_m && atM < interval.end_m)) return;
