@@ -6,6 +6,7 @@ import { clock, distanceLabel, paceLabel, speedLabel } from "./format.js";
 import { courseLength, polylineLength } from "./geo.js";
 import { COURSE_COLORS } from "./map.js";
 import { planSummary, stopLabel } from "./plans.js";
+import { canRedo, canUndo } from "./shapes.js";
 
 const MODES = ["run", "bike", "swim", "other"];
 const TRAVEL = ["walk", "bike", "drive"];
@@ -13,12 +14,15 @@ const TRAVEL = ["walk", "bike", "drive"];
 /** Per-root state that outlives a render, with the listeners that maintain it. */
 const panels = new WeakMap();
 
+/** The map menu that already took focus, so it is only taken once per opening. */
+let focusedMenu = null;
+
 function panelState(root) {
   let state = panels.get(root);
   if (!state) {
     state = { editingTime: false, pendingRender: null, actions: null, renaming: null };
     panels.set(root, state);
-    trackTimeEditing(root, state);
+    trackFieldFocus(root, state);
     trackGhostDismissal(root);
     trackDialogs(root, state);
     trackNestedFolds(root, state);
@@ -153,19 +157,26 @@ export function renderHoverTip(root, hovered, unit) {
  */
 export function renderMapMenu(root, menu, ui, actions) {
   root.hidden = !menu;
-  if (!menu) return;
+  if (!menu) {
+    root.innerHTML = "";
+    root.removeAttribute("aria-label");
+    focusedMenu = null;
+    return;
+  }
   const snap = (field, on, label) =>
     `<label title="Snapping is not built yet">${label} ${toggle(field, on, "disabled")}</label>`;
   root.setAttribute("aria-label", menu.kind === "point" ? "This point" : "This stretch of the course");
   root.innerHTML =
     menu.kind === "point"
-      ? `<button data-act="movePoint">${ui.held ? "Click where it goes" : "Move"}</button>
+      ? `<button data-act="movePoint">Move</button>
          <button data-act="deletePoint">Delete</button>`
       : `<button data-act="addPointHere">Add point</button>
          ${snap("snapRoads", ui.snap.roads, "snap to roads")}
          ${snap("snapPaths", ui.snap.paths, "snap to paths")}`;
   bindActions(root, actions);
-  root.querySelector("button")?.focus({ preventScroll: true });
+  // Only a menu that has just opened takes focus; a redraw from a finished plan must not steal it.
+  if (focusedMenu !== menu) root.querySelector("button")?.focus({ preventScroll: true });
+  focusedMenu = menu;
 }
 
 /** Clicks and changes inside `root` dispatch to `actions` by their `data-act` / `data-field`. */
@@ -200,8 +211,12 @@ function bindActions(root, actions) {
   }
 }
 
-/** Chromium reports no active element between a time input's segments, so focus is tracked by its events. */
-function trackTimeEditing(root, state) {
+/**
+ * Tracks a field losing focus, to end a rename and to know when a time is being typed. Chromium
+ * reports no active element between a time input's segments, so that has to be followed through
+ * its own events rather than read off the document.
+ */
+function trackFieldFocus(root, state) {
   root.addEventListener("focusin", (e) => {
     state.editingTime = e.target.type === "time";
   });
@@ -318,8 +333,8 @@ function courseTools(course, ci, ui) {
   }
   const tool = (kind) => ui.tool?.kind === kind && ui.tool.courseIndex === ci;
   return `<div class="row">
-    <button data-act="undo" data-ci="${ci}">Undo point</button>
-    <button data-act="redo" data-ci="${ci}" ${ui.undone[course.id]?.length ? "" : "disabled"}>Redo point</button>
+    <button data-act="undo" data-ci="${ci}" ${canUndo(ui.shapes, course) ? "" : "disabled"}>Undo</button>
+    <button data-act="redo" data-ci="${ci}" ${canRedo(ui.shapes, course) ? "" : "disabled"}>Redo</button>
     ${toolButton("split", tool("split"), "Split", "Click the course", `data-ci="${ci}"`)}
     <button data-act="editCourse" data-ci="${ci}" class="active">Done</button>
   </div>`;

@@ -3,11 +3,12 @@
 /** Metres along a path of lat/lon points. */
 export function polylineLength(points) {
   let total = 0;
-  for (let i = 1; i < points.length; i++) total += haversineM(points[i - 1], points[i]);
+  for (let i = 1; i < points.length; i++) total += metresBetween(points[i - 1], points[i]);
   return total;
 }
 
-function haversineM(a, b) {
+/** Metres between two lat/lon points, over the sphere. */
+export function metresBetween(a, b) {
   const rad = (d) => (d * Math.PI) / 180;
   const dLat = rad(b.lat - a.lat);
   const dLon = rad(b.lon - a.lon);
@@ -29,7 +30,7 @@ export function cutPolyline(points, cuts) {
   let along = 0;
   let next = 0;
   for (let i = 1; i < points.length; i++) {
-    const step = haversineM(points[i - 1], points[i]);
+    const step = metresBetween(points[i - 1], points[i]);
     // A step of no length has no fraction to cut at; the cut waits for one that has.
     while (next < within.length && step > 0 && within[next] <= along + step) {
       const at = between(points[i - 1], points[i], (within[next] - along) / step);
@@ -45,7 +46,8 @@ export function cutPolyline(points, cuts) {
   return pieces;
 }
 
-const between = (a, b, fraction) => ({
+/** The point `fraction` of the way from `a` to `b`. */
+export const between = (a, b, fraction) => ({
   lat: a.lat + (b.lat - a.lat) * fraction,
   lon: a.lon + (b.lon - a.lon) * fraction,
 });
@@ -68,7 +70,7 @@ export function courseCenter(event, fallback) {
     for (const segment of course.segments) {
       for (let i = 1; i < segment.points.length; i++) {
         const [a, b] = [segment.points[i - 1], segment.points[i]];
-        const w = haversineM(a, b);
+        const w = metresBetween(a, b);
         weight += w;
         lat += (w * (a.lat + b.lat)) / 2;
         lon += (w * (a.lon + b.lon)) / 2;
@@ -85,7 +87,7 @@ export function distanceAlong(course, hit) {
     if (si < hit.segmentIndex) along += polylineLength(segment.points);
     if (si === hit.segmentIndex) {
       along += polylineLength(segment.points.slice(0, hit.pointIndex + 1));
-      along += haversineM(segment.points[hit.pointIndex], hit.latlon);
+      along += metresBetween(segment.points[hit.pointIndex], hit.latlon);
     }
   });
   return along;

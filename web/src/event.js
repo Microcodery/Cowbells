@@ -53,36 +53,31 @@ export function addPoint(course, latlon) {
     course.segments.push({ id: id("seg"), mode: "run", points: [], viewable: true });
   }
   course.segments.at(-1).points.push(latlon);
-}
-
-/** Takes back the last point drawn, and reports what it took so it can be put back. */
-export function undoPoint(course) {
-  const last = course.segments.at(-1);
-  const latlon = last?.points.pop();
-  if (!latlon) return null;
-  const emptied = last.points.length === 0 && course.segments.length > 1;
-  return { latlon, segment: emptied ? course.segments.pop() : null };
-}
-
-/** Puts back what `undoPoint` took, segment and all. */
-export function redoPoint(course, undone) {
-  if (undone.segment) course.segments.push(undone.segment);
-  addPoint(course, undone.latlon);
+  return true;
 }
 
 /**
- * Puts a drawn point somewhere else, and reports whether it went. Segments that meet do so at a
- * shared point, so moving one side moves the other; segments parted by a gap keep their gap.
+ * Every place a move of one point lands, as `[segmentIndex, pointIndex]` pairs. Segments that meet
+ * do so at a shared point, so moving one side moves the other; segments parted by a gap keep their
+ * gap. Dragging a point draws this same set, so what the map shows is what the drop will do.
  */
-export function movePoint(course, segmentIndex, pointIndex, latlon) {
+export function movedSlots(course, segmentIndex, pointIndex) {
   const segment = course.segments[segmentIndex];
   const was = segment?.points[pointIndex];
-  if (!was) return false;
+  if (!was) return [];
   const above = course.segments[segmentIndex - 1]?.points;
   const below = course.segments[segmentIndex + 1]?.points;
-  segment.points[pointIndex] = latlon;
-  if (pointIndex === 0 && above?.length && coincide(above.at(-1), was)) above[above.length - 1] = latlon;
-  if (pointIndex === segment.points.length - 1 && below?.length && coincide(below[0], was)) below[0] = latlon;
+  const slots = [[segmentIndex, pointIndex]];
+  if (pointIndex === 0 && above?.length && coincide(above.at(-1), was)) slots.push([segmentIndex - 1, above.length - 1]);
+  if (pointIndex === segment.points.length - 1 && below?.length && coincide(below[0], was)) slots.push([segmentIndex + 1, 0]);
+  return slots;
+}
+
+/** Puts a drawn point somewhere else, and reports whether it went. */
+export function movePoint(course, segmentIndex, pointIndex, latlon) {
+  const slots = movedSlots(course, segmentIndex, pointIndex);
+  if (slots.length === 0) return false;
+  for (const [si, pi] of slots) course.segments[si].points[pi] = latlon;
   return true;
 }
 
@@ -119,17 +114,20 @@ export function removeCourse(event, course) {
 /** Split a segment at `pointIndex` (insert `latlon` after it). Pace profiles are unaffected. */
 export function splitSegment(course, segmentIndex, pointIndex, latlon) {
   const segment = course.segments[segmentIndex];
+  if (!segment) return false;
   const before = segment.points.slice(0, pointIndex + 1).concat([latlon]);
   const after = [latlon].concat(segment.points.slice(pointIndex + 1));
   segment.points = before;
   course.segments.splice(segmentIndex + 1, 0, { id: id("seg"), mode: segment.mode, points: after, viewable: segment.viewable });
+  return true;
 }
 
 export function mergeWithNext(course, segmentIndex) {
   const [a, b] = [course.segments[segmentIndex], course.segments[segmentIndex + 1]];
-  if (!b) return;
+  if (!b) return false;
   a.points = a.points.concat(b.points.slice(1));
   course.segments.splice(segmentIndex + 1, 1);
+  return true;
 }
 
 /** Where each segment ends, measured along the course, with 0 and the finish included. */
@@ -141,6 +139,9 @@ export function segmentBoundaries(course) {
 /** Segments and legs keep at least this much length, so neither collapses to nothing. */
 const SHORTEST_M = 1;
 
+/** Closer together than this and two distances along a course are the same distance. */
+const A_HAIR_M = 0.05;
+
 const clamp = (value, low, high) => Math.min(Math.max(value, low), high);
 
 /**
@@ -149,19 +150,22 @@ const clamp = (value, low, high) => Math.min(Math.max(value, low), high);
  */
 export function moveSegmentBoundary(course, index, metres) {
   const [before, after] = [course.segments[index], course.segments[index + 1]];
-  if (!after || !coincide(before?.points.at(-1), after.points[0])) return;
+  if (!after || !coincide(before?.points.at(-1), after.points[0])) return false;
   const boundaries = segmentBoundaries(course);
   // Boundaries lead with the start line, so the pair runs from the mark at `index` to the one two on.
   const [low, high] = [boundaries[index], boundaries[index + 2]];
-  if (high - low < 2 * SHORTEST_M) return;
+  if (high - low < 2 * SHORTEST_M) return false;
   const pair = before.points.concat(after.points.slice(1));
   // The old boundary was cut into the line and adds nothing to it; drop it so nudging cannot pile up.
   const join = before.points.length - 1;
   if (addsNoLength(pair[join - 1], pair[join], pair[join + 1])) pair.splice(join, 1);
   const at = clamp(metres, low + SHORTEST_M, high - SHORTEST_M) - low;
+  // Nudging a boundary already against its stop changes nothing, and an undo of nothing looks broken.
+  if (Math.abs(at - (boundaries[index + 1] - low)) < A_HAIR_M) return false;
   const [head, tail] = cutPolyline(pair, [at]);
   before.points = head;
   after.points = tail;
+  return true;
 }
 
 const addsNoLength = (a, p, b) => a && b && polylineLength([a, p, b]) - polylineLength([a, b]) < 0.05;
@@ -207,6 +211,9 @@ export function reconcileProfiles(event) {
     const length = courseLength(course);
     const profile = racer.pace_profile;
     const current = profile.at(-1)?.end_m ?? 0;
+    // A course with no length says nothing about pace. Scaling to it would flatten the profile and
+    // the next pass would reseed it, so undoing back through an empty course keeps what it has.
+    if (length === 0) continue;
     if (profile.length === 0 || current === 0) {
       racer.pace_profile = seedProfile(course);
     } else if (Math.abs(current - length) > 0.5) {

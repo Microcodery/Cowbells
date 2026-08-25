@@ -3,7 +3,7 @@ import { addCourse, newEvent } from "../src/event.js";
 import { UNITS } from "../src/format.js";
 import { renderPanel } from "../src/panel.js";
 
-const ui = { tool: null, itinerary: null, network: null, osm: null, status: "", busy: false, beam: 64, unit: UNITS.km, undone: {}, editing: null, debug: { networkMs: 1000, candidatesMs: 1000, mergeMs: 1000, searchMs: 3000, fitMargin: 10, hoverPx: 18, mapDataDelayMs: 1500 } };
+const ui = { tool: null, itinerary: null, network: null, osm: null, status: "", busy: false, beam: 64, unit: UNITS.km, shapes: {}, editing: null, debug: { networkMs: 1000, candidatesMs: 1000, mergeMs: 1000, searchMs: 3000, fitMargin: 10, hoverPx: 18, mapDataDelayMs: 1500 } };
 
 describe("the load dialog", () => {
   it("offers a file drop zone and every example behind one Load button", () => {

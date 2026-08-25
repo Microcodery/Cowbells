@@ -3,6 +3,8 @@
 import { Map as MapLibre, NavigationControl, setWorkerUrl } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { arrowLines, courseEnds, overlapChunks } from "./courselines.js";
+import { movedSlots } from "./event.js";
+import { metresBetween } from "./geo.js";
 import { ICON_PREFIX, icons } from "./icons.js";
 import { stopLabel } from "./plans.js";
 // MapLibre resolves its tile worker with a dynamic URL Vite cannot bundle; hand it a built one.
@@ -49,11 +51,13 @@ export function createMap(container, center, onClick, onHover) {
     attributionControl: { compact: true },
   });
   map.addControl(new NavigationControl(), "top-right");
-  map.on("click", (e) => onClick({ lat: e.lngLat.lat, lon: e.lngLat.lng }, metresPerPixel(map)));
+  // Handlers get where the pointer is on screen as well as on the ground: how near a click counts
+  // as landing on something is a distance in pixels, and pixels is where it stays exact.
+  map.on("click", (e) => onClick({ lat: e.lngLat.lat, lon: e.lngLat.lng }, e.point));
   // Touch devices synthesise mouse events around a tap, including a mouseout that would hide
   // what the tap just showed; they get hover from taps instead (see the click handler).
   if (matchMedia("(hover: hover)").matches) {
-    map.on("mousemove", (e) => onHover({ lat: e.lngLat.lat, lon: e.lngLat.lng }, metresPerPixel(map)));
+    map.on("mousemove", (e) => onHover({ lat: e.lngLat.lat, lon: e.lngLat.lng }, e.point));
     map.on("mouseout", () => onHover(null));
   }
   map.on("style.load", () => addLayers(map));
@@ -170,13 +174,35 @@ export function setHover(map, latlon, courseIndex) {
   map.getSource("hover").setData(collection(features));
 }
 
+/**
+ * Metres to a pixel at the middle of the view, asked of the map rather than assumed from the zoom:
+ * tile size and projection are the map's business, and a constant here would only agree with it by
+ * luck. Tilting the map makes this a rough figure — the scale then varies down the screen — so it
+ * is for drawing at a glance, not for deciding what a click landed on.
+ */
 export function metresPerPixel(map) {
-  const lat = map.getCenter().lat;
-  return (156543.03 * Math.cos((lat * Math.PI) / 180)) / 2 ** map.getZoom();
+  const canvas = map.getCanvas();
+  const [x, y] = [canvas.clientWidth / 2, canvas.clientHeight / 2];
+  if (!(x > 0 && y > 0)) return 0;
+  // Stepping a pixel each way rather than a distance on the ground: the ground turns with the map,
+  // and on a tilted one the two axes disagree, so the scale of a circle drawn here is their mean.
+  // MapLibre speaks lng; the rest of the app speaks lon.
+  const ground = (p) => ({ lat: p.lat, lon: p.lng });
+  const here = ground(map.unproject([x, y]));
+  const across = metresBetween(here, ground(map.unproject([x + 1, y])));
+  const down = metresBetween(here, ground(map.unproject([x, y + 1])));
+  return Math.sqrt(across * down);
+}
+
+/** The slots that show the carried point in place of the course's own, or null when none is held. */
+function carriedSlots(course, held) {
+  if (!held?.at) return null;
+  const slots = movedSlots(course, held.segmentIndex, held.pointIndex);
+  return slots.length ? new Set(slots.map(([si, pi]) => `${si}:${pi}`)) : null;
 }
 
 /** Redraw every overlay; editing a course shows its points and leaves the other courses out of the way. */
-export function render(map, event, itinerary, editingCourse = null) {
+export function render(map, event, itinerary, editingCourse = null, held = null) {
   if (!map.getSource("courses")) return;
   const courses = [];
   const vertices = [];
@@ -184,10 +210,15 @@ export function render(map, event, itinerary, editingCourse = null) {
   event.courses.forEach((course, i) => {
     if (editingCourse !== null && i !== editingCourse) return;
     const color = COURSE_COLORS[i % COURSE_COLORS.length];
-    shapes.push({ points: course.segments.flatMap((s) => s.points), color });
-    course.segments.forEach((segment) => {
-      if (segment.points.length >= 2) courses.push(feature(lineOf(segment.points), { color }));
-      if (i === editingCourse) segment.points.forEach((p) => vertices.push(feature(pointOf(p), { color })));
+    // A carried point is only ever drawn; the event keeps the place it came from until it lands.
+    const carried = i === editingCourse ? carriedSlots(course, held) : null;
+    const drawn = course.segments.map((segment, si) =>
+      carried ? segment.points.map((p, pi) => (carried.has(`${si}:${pi}`) ? held.at : p)) : segment.points,
+    );
+    shapes.push({ points: drawn.flat(), color });
+    drawn.forEach((points) => {
+      if (points.length >= 2) courses.push(feature(lineOf(points), { color }));
+      if (i === editingCourse) points.forEach((p) => vertices.push(feature(pointOf(p), { color })));
     });
   });
   map.getSource("courses").setData(collection(courses));

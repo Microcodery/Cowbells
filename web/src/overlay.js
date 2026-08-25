@@ -80,7 +80,9 @@ export function overlay(map) {
      */
     sectors(id, centres, color, radiusM, alpha, sweep = 2 * Math.PI) {
       const xy = project(id, centres);
-      const r = radiusM / metresPerPixel(map);
+      const scale = metresPerPixel(map);
+      // A map too small to measure has no radius worth drawing; dividing by it would give infinity.
+      const r = scale > 0 ? radiusM / scale : 0;
       const start = -Math.PI / 2;
       ctx.fillStyle = color;
       ctx.globalAlpha = alpha;

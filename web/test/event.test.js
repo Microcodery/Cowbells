@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { deletePoint, insertPoint, mergeInterval, moveSegmentBoundary, movePoint, newEvent, rebase, redoPoint, segmentBoundaries, undoPoint } from "../src/event.js";
+import { deletePoint, insertPoint, mergeInterval, moveSegmentBoundary, movePoint, movedSlots, newEvent, rebase, reconcileProfiles, segmentBoundaries } from "../src/event.js";
 import { polylineLength } from "../src/geo.js";
 
 const racerWith = (...intervals) => ({
@@ -132,27 +132,59 @@ describe("moveSegmentBoundary", () => {
   });
 });
 
-describe("undo and redo", () => {
-  it("puts back the point it took", () => {
-    const course = twoSegments();
-    const shape = JSON.stringify(course.segments);
-    redoPoint(course, undoPoint(course));
-    expect(JSON.stringify(course.segments)).toBe(shape);
+describe("reconcileProfiles", () => {
+  const eventWith = (course, ...intervals) => ({
+    courses: [course],
+    racers: [{ id: "r", course_id: course.id, ...racerWith(...intervals) }],
   });
 
-  it("puts back the segment that taking the point emptied", () => {
+  it("stretches a profile to the course it belongs to", () => {
     const course = twoSegments();
-    course.segments[1].points = course.segments[1].points.slice(0, 1);
-    const shape = JSON.stringify(course.segments);
-    const undone = undoPoint(course);
-    expect(course.segments, "the emptied segment goes with the point").toHaveLength(1);
-    redoPoint(course, undone);
-    expect(JSON.stringify(course.segments)).toBe(shape);
+    const event = eventWith(course, [0, 2000, 300]);
+    course.segments.pop();
+    reconcileProfiles(event);
+    expect(event.racers[0].pace_profile[0].end_m, "half the course, half the distance").toBeCloseTo(1000, 0);
   });
 
-  it("reports nothing to put back once the course is empty", () => {
-    const course = { id: "c", segments: [{ id: "a", mode: "run", points: [], viewable: true }] };
-    expect(undoPoint(course)).toBeNull();
+  it("keeps the paces a racer has while their course has no length", () => {
+    const course = twoSegments();
+    const event = eventWith(course, [0, 1000, 300], [1000, 2000, 400]);
+    const before = JSON.stringify(event.racers[0].pace_profile);
+    for (const segment of course.segments) segment.points = [];
+    reconcileProfiles(event);
+    expect(JSON.stringify(event.racers[0].pace_profile), "an empty course says nothing about pace").toBe(before);
+  });
+
+  it("does not trade a racer's paces for defaults on the way back", () => {
+    const course = twoSegments();
+    const event = eventWith(course, [0, 2000, 333]);
+    const shape = structuredClone(course.segments);
+    for (const segment of course.segments) segment.points = [];
+    reconcileProfiles(event);
+    course.segments = shape;
+    reconcileProfiles(event);
+    expect(event.racers[0].pace_profile[0].seconds_per_km, "the pace they set survived the round trip").toBe(333);
+  });
+});
+
+describe("movedSlots", () => {
+  it("takes both sides of a join, so the map draws a move the way it will land", () => {
+    const course = twoSegments();
+    const slots = movedSlots(course, 0, 1);
+    expect(slots).toEqual([
+      [0, 1],
+      [1, 0],
+    ]);
+  });
+
+  it("leaves a gap between segments alone", () => {
+    const course = twoSegments();
+    course.segments[1].points = course.segments[1].points.map((p) => ({ lat: p.lat + 0.05, lon: p.lon }));
+    expect(movedSlots(course, 0, 1), "a gap is the user's own").toEqual([[0, 1]]);
+  });
+
+  it("has nothing to say about a point that is not there", () => {
+    expect(movedSlots(twoSegments(), 4, 0)).toEqual([]);
   });
 });
 
