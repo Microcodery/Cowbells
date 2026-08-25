@@ -84,6 +84,13 @@ body {
   position: relative;
 }
 
+/* MapLibre sets touch-action from whichever gestures are switched on, and dragging a point
+   switches several off for a moment. Pinning it keeps that from handing the drag to the browser. */
+#map .maplibregl-canvas-container,
+#map .maplibregl-canvas {
+  touch-action: none;
+}
+
 #map .overlay {
   position: absolute;
   inset: 0;
@@ -123,7 +130,7 @@ body {
   }
 }
 
-/* The little menu a click on the course opens, sitting where it was clicked. */
+/* The bin for a point picked out on the map, sitting just above it. */
 #mapmenu {
   position: absolute;
   z-index: 7;
@@ -131,11 +138,7 @@ body {
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 10px;
-  padding: 8px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  min-width: 10rem;
+  padding: 4px;
 }
 
 #mapmenu[hidden] {
@@ -143,14 +146,17 @@ body {
 }
 
 #mapmenu button {
-  width: 100%;
-  text-align: left;
+  display: grid;
+  place-items: center;
+  padding: 6px;
+  color: var(--danger);
 }
 
-#mapmenu label {
-  justify-content: space-between;
+/* A line of guidance under a course's tools, explaining the gestures the map answers to. */
+.hint {
+  margin: 0 0 8px;
   font-size: 12px;
-  color: var(--muted);
+  line-height: 1.4;
 }
 
 #hover {

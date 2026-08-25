@@ -27,9 +27,9 @@ import {
 } from "./event.js";
 import { UNITS, laterThan, parsePace, todayAt, withClock } from "./format.js";
 import { invalidatePlan, planGeneration } from "./generation.js";
-import { arrivalsAt, between, distanceAlong, largestCourse, nearestOnCourses, nearestOnEachCourse } from "./geo.js";
+import { alongPolyline, arrivalsAt, between, distanceAlong, largestCourse, nearestOnEachCourse, polylineLength } from "./geo.js";
 import { itineraryToGpx } from "./gpx.js";
-import { createMap, currentTheme, fitTo, flyTo, mapCenter, render as renderMap, replayCanvas, revealItinerary, setHover, setTheme } from "./map.js";
+import { createMap, currentTheme, fitTo, flyTo, mapCenter, render as renderMap, replayCanvas, revealItinerary, setEditing, setHover, setTheme } from "./map.js";
 import { createMapData } from "./mapdata.js";
 import { overlay } from "./overlay.js";
 import { closeDialog, openDialog, renderHeader, renderHoverTip, renderMapMenu, renderPanel, setStatus } from "./panel.js";
@@ -63,9 +63,11 @@ const ui = {
   shapes: {},
   // The course whose shape is open for editing; its points are the ones the map offers.
   editing: null,
-  // What the map is asking about: a point of the course, or the line between two of them.
-  menu: null,
-  // The point a move has taken hold of, waiting to be put down.
+  // What the pointer is over on the course being edited: one of its points, or the line between two.
+  hot: null,
+  // A point clicked rather than dragged, which is the one the bin would take away.
+  selected: null,
+  // The point a drag has hold of, holding where the pointer is so the event does not have to.
   held: null,
   // The racer whose name is open for typing over.
   renaming: null,
@@ -75,11 +77,12 @@ const ui = {
 
 const reshapeCourse = (course, change, gesture) => reshape(ui.shapes, course, change, gesture);
 
-const CARRY_HINT = "Carrying the point; click to put it down.";
 let event = loadSaved() ?? newEvent(DEFAULT_CENTER);
 let autosave;
-/** The redraw a carried point has already asked for, so a flurry of pointer moves only makes one. */
-let carryFrame = null;
+/** The map redraw already asked for, so pointer moves that arrive before it still make only one. */
+let mapFrame = null;
+/** A fingertip covers far more than a cursor, so what counts as near enough opens up to suit it. */
+const FINGER_ALLOWANCE = matchMedia("(pointer: coarse)").matches ? 2.2 : 1;
 /** Ticks this far apart are separate goes at a field rather than one spinner being held down. */
 const GESTURE_IDLE_MS = 400;
 let gestureIdle;
@@ -97,7 +100,15 @@ const hoverTip = document.getElementById("hover");
 const mapMenu = document.getElementById("mapmenu");
 const mapStatus = document.getElementById("mapstatus");
 const scan = document.getElementById("scan");
-const map = createMap("map", event.origin, onMapClick, onMapHover);
+const map = createMap("map", event.origin, {
+  press: onMapPress,
+  drag: onMapDrag,
+  drop: onMapDrop,
+  cancel: clearSelection,
+  click: onMapClick,
+  doubleClick: onMapDoubleClick,
+  hover: onMapHover,
+});
 const overlayCanvas = overlay(map);
 const mapdata = createMapData({
   engine,
@@ -112,7 +123,7 @@ map.on("layers-ready", render);
 map.once("layers-ready", () => mapdata.restore());
 map.on("move", placeHoverTip);
 map.on("move", placeMapMenu);
-document.addEventListener("keydown", (e) => e.key === "Escape" && closeMapMenu());
+document.addEventListener("keydown", (e) => e.key === "Escape" && clearSelection());
 window.cowbells = { map, event: () => event, shapes: () => ui.shapes };
 
 /** A preference chosen on an earlier visit, or `fallback` when it is missing or no longer offered. */
@@ -151,8 +162,10 @@ function render() {
   renderPanel(panel, event, ui, actions);
   mapStatus.textContent = ui.status;
   mapStatus.hidden = !ui.status;
-  renderMap(map, event, ui.itinerary, editingIndex(), ui.held);
-  renderMapMenu(mapMenu, ui.menu, ui, actions);
+  // Derived here rather than at each place editing starts or stops, so none can forget it.
+  setEditing(map, editingIndex() !== null);
+  renderMap(map, event, ui.itinerary, editingIndex(), ui.held, ui.hot);
+  renderMapMenu(mapMenu, ui.selected, actions);
   placeMapMenu();
   clearTimeout(autosave);
   autosave = setTimeout(() => localStorage.setItem(EVENT_KEY, JSON.stringify(event)), AUTOSAVE_DELAY_MS);
@@ -169,7 +182,7 @@ function narrate(text) {
 function mutate(edit) {
   releaseHeld();
   edit();
-  ui.menu = null;
+  Object.assign(ui, { selected: null, hot: null });
   reconcileProfiles(event);
   ui.itinerary = null;
   invalidatePlan();
@@ -199,7 +212,7 @@ async function adoptEvent(loaded, osm, loadedMessage) {
   ui.itinerary = null;
   ui.alternatives = null;
   // The old event's editing state means nothing to this one, and its courses may not even exist.
-  Object.assign(ui, { tool: null, editing: null, shapes: {}, menu: null, held: null, renaming: null });
+  Object.assign(ui, { tool: null, editing: null, shapes: {}, selected: null, hot: null, held: null, renaming: null });
   showCourses();
   ui.status = (await mapdata.adopt(osm)) ?? loadedMessage;
 }
@@ -217,7 +230,7 @@ const closePanelOnPhones = () => matchMedia("(max-width: 700px)").matches && doc
 function toggleTool(kind, courseIndex) {
   const same = ui.tool?.kind === kind && ui.tool.courseIndex === courseIndex;
   releaseHeld();
-  ui.menu = null;
+  Object.assign(ui, { selected: null, hot: null });
   ui.tool = same ? null : { kind, courseIndex };
   render();
 }
@@ -244,7 +257,7 @@ function closestOnLine(a, b, p) {
  */
 function whatIsUnder(course, at) {
   if (!at) return null;
-  const reach = ui.debug.hoverPx;
+  const reach = ui.debug.hoverPx * FINGER_ALLOWANCE;
   const screen = course.segments.map((segment) => segment.points.map((p) => map.project([p.lon, p.lat])));
   let vertex = null;
   screen.forEach((points, segmentIndex) => {
@@ -271,82 +284,85 @@ function whatIsUnder(course, at) {
 function onMapClick(latlon, at) {
   const tool = ui.tool;
   if (!tool && ui.editing) return onEditClick(latlon, at);
-  // Off the course being edited, with no tool active, a tap is a hover: phones cannot hover.
+  // Off any course, with no tool active, a tap is a hover: phones cannot hover.
   if (!tool) return onMapHover(latlon, at);
   mutate(() => {
     if (tool.kind === "start") event.spectator.start = latlon;
     if (tool.kind === "end") event.spectator.end = { location: latlon, latest: event.spectator.earliest + 4 * 3600 };
     if (tool.kind === "region") addRegion(event, latlon);
-    if (tool.kind === "split") {
-      const hit = nearestOnCourses(event, latlon);
-      if (hit && hit.courseIndex === tool.courseIndex) {
-        const course = event.courses[hit.courseIndex];
-        reshapeCourse(course, () => splitSegment(course, hit.segmentIndex, hit.pointIndex, hit.latlon));
-      }
-    }
     ui.tool = null;
   });
 }
 
+/** The course open for editing, if one is. */
+const editedCourse = () => event.courses[editingIndex()] ?? null;
+
 /**
- * Runs a reshaping of the course being edited on what the menu points at. An edit the course
- * refuses leaves the menu up and says why, so the plan survives and the click is not mistaken
- * for one that landed.
+ * A click on the course being edited that was not a drag. On the line it does nothing — the line's
+ * settings live in the course card. Away from the course it puts down whatever was picked out, or,
+ * with nothing picked out, draws the course on to where the click landed.
  */
-function reshapeAtMenu(edit, refusal) {
-  const course = event.courses[editingIndex()];
-  const menu = ui.menu;
-  if (!course || !menu) {
-    ui.menu = null;
-    return render();
-  }
-  if (!reshapeCourse(course, () => edit(course, menu))) {
-    ui.status = refusal;
-    return render();
-  }
-  ui.menu = null;
-  return mutate(() => {});
+function onEditClick(latlon, at) {
+  const course = editedCourse();
+  if (!course) return;
+  if (whatIsUnder(course, at)) return clearSelection();
+  if (ui.selected) return clearSelection();
+  reshapeCourse(course, () => addPoint(course, latlon));
+  mutate(() => {});
 }
 
-function closeMapMenu() {
-  if (!ui.menu && !ui.held) return;
+/** Takes hold of a point when the press lands on one, so the map drags it instead of panning. */
+function onMapPress(latlon, at) {
+  const course = ui.tool ? null : editedCourse();
+  if (!course) return false;
+  const under = whatIsUnder(course, at);
+  if (under?.kind !== "point") return false;
+  const { segmentIndex, pointIndex } = under;
+  ui.held = { segmentIndex, pointIndex, at: course.segments[segmentIndex].points[pointIndex] };
+  ui.selected = null;
+  render();
+  return true;
+}
+
+function onMapDrag(latlon) {
+  if (ui.held) trackHeld(ui.held, latlon);
+}
+
+/**
+ * Lets a dragged point go. A press that never strayed was a click on the point rather than a drag,
+ * and picks it out so it can be taken away; one that travelled moves it to where it was let go.
+ */
+function onMapDrop(latlon, at, strayed) {
+  const held = ui.held;
+  const course = editedCourse();
   releaseHeld();
-  ui.menu = null;
+  if (!held || !course) return render();
+  if (!strayed) {
+    ui.selected = { segmentIndex: held.segmentIndex, pointIndex: held.pointIndex, at: held.at };
+    return render();
+  }
+  if (reshapeCourse(course, () => movePoint(course, held.segmentIndex, held.pointIndex, latlon))) {
+    return mutate(() => {});
+  }
+  ui.status = "That point is no longer there to move.";
   render();
 }
 
-/**
- * While a course is open for editing, the map answers clicks about its shape: a point offers to
- * move or go, and the line between points offers a new one. A click away from the course puts an
- * open menu down, or, with nothing open, adds a point to the end of what is drawn.
- */
-function onEditClick(latlon, at) {
-  const index = editingIndex();
-  const course = event.courses[index];
+/** A double click on the course being edited puts a new point where it landed. */
+function onMapDoubleClick(latlon, at) {
+  const course = ui.tool ? null : editedCourse();
   if (!course) return;
-  const held = ui.held;
-  if (held) {
-    releaseHeld();
-    ui.menu = null;
-    if (reshapeCourse(course, () => movePoint(course, held.segmentIndex, held.pointIndex, latlon))) {
-      return mutate(() => {});
-    }
-    ui.status = "That point is no longer there to move.";
-    return render();
-  }
   const under = whatIsUnder(course, at);
-  if (under) {
-    const { kind, segmentIndex, pointIndex, at: spot } = under;
-    ui.menu = { kind, at: spot, segmentIndex, pointIndex };
-    return render();
-  }
-  // Away from the course: put down an open menu, or draw the course on to where the click landed.
-  if (ui.menu) {
-    ui.menu = null;
-    return render();
-  }
-  reshapeCourse(course, () => addPoint(course, latlon));
+  if (under?.kind !== "line") return;
+  reshapeCourse(course, () => insertPoint(course, under.segmentIndex, under.pointIndex, under.at));
   mutate(() => {});
+}
+
+function clearSelection() {
+  if (!ui.selected && !ui.held) return;
+  releaseHeld();
+  ui.selected = null;
+  render();
 }
 
 /**
@@ -355,11 +371,18 @@ function onEditClick(latlon, at) {
  */
 function trackHeld(held, latlon) {
   held.at = latlon;
-  // Pointer moves outrun the redraw, and every source it sets re-tiles: one redraw a frame is enough.
-  if (carryFrame) return;
-  carryFrame = requestAnimationFrame(() => {
-    carryFrame = null;
-    renderMap(map, event, ui.itinerary, editingIndex(), ui.held);
+  redrawMapSoon();
+}
+
+/**
+ * Redraws the map on the next frame. Pointer moves outrun the redraw and every source it sets
+ * re-tiles, so a flurry of them still costs only the one.
+ */
+function redrawMapSoon() {
+  if (mapFrame) return;
+  mapFrame = requestAnimationFrame(() => {
+    mapFrame = null;
+    renderMap(map, event, ui.itinerary, editingIndex(), ui.held, ui.hot);
   });
 }
 
@@ -377,17 +400,18 @@ function nudgeBoundary(course, index, shown) {
 /** Ends a carry. The event never held the cursor's place, so there is nothing to put back. */
 function releaseHeld() {
   if (!ui.held) return;
+  cancelAnimationFrame(mapFrame);
+  mapFrame = null;
   ui.held = null;
-  if (ui.status === CARRY_HINT) ui.status = "";
 }
 
 /**
- * Keeps the menu on the spot it was opened at as the map moves under it, and inside the map:
- * it sits above the spot unless the top is in the way, and never past a side or the header.
+ * Keeps the bin over the point it belongs to as the map moves under it, and inside the map: it
+ * sits above the point unless the top is in the way, and never past a side or the header.
  */
 function placeMapMenu() {
-  if (!ui.menu) return;
-  const at = map.project([ui.menu.at.lon, ui.menu.at.lat]);
+  if (!ui.selected) return;
+  const at = map.project([ui.selected.at.lon, ui.selected.at.lat]);
   const menu = mapMenu.getBoundingClientRect();
   const within = map.getContainer().getBoundingClientRect();
   const margin = 8;
@@ -398,11 +422,26 @@ function placeMapMenu() {
   mapMenu.style.top = `${above < ceiling ? at.y + 14 : above}px`;
 }
 
+/**
+ * Lights up whatever the pointer is over on the course being edited, so what a press would take
+ * hold of is never in doubt. Only the map is redrawn, and only when the answer changes.
+ */
+const sameSpot = (a, b) => a?.kind === b?.kind && a?.segmentIndex === b?.segmentIndex && a?.pointIndex === b?.pointIndex;
+
+function highlightUnder(course, at) {
+  const under = at ? whatIsUnder(course, at) : null;
+  if (sameSpot(ui.hot, under)) return;
+  ui.hot = under;
+  redrawMapSoon();
+}
+
 /** Hovering a course marks the spot and lists when each racer on it should pass. */
 function onMapHover(latlon, at) {
   if (ui.held && latlon) return trackHeld(ui.held, latlon);
-  // Editing asks about the shape, not the racers; arrival times would only crowd the menu.
-  const hits = latlon && !ui.editing ? nearestOnEachCourse(event, latlon).filter((h) => withinReach(h.latlon, at)) : [];
+  const editing = ui.tool ? null : editedCourse();
+  // Editing asks about the shape, not the racers; arrival times would only get in the way.
+  if (editing) return highlightUnder(editing, latlon ? at : null);
+  const hits = latlon ? nearestOnEachCourse(event, latlon).filter((h) => withinReach(h.latlon, at)) : [];
   if (!hits.length) {
     hoverAnchor = null;
     setHover(map, null);
@@ -464,7 +503,7 @@ const actions = {
     // A carried point only means anything for the course now closing; drop it before editing moves on.
     releaseHeld();
     ui.editing = ui.editing === course.id ? null : course.id;
-    Object.assign(ui, { tool: null, menu: null });
+    Object.assign(ui, { tool: null, selected: null, hot: null });
     setHover(map, null);
     hoverTip.hidden = true;
     render();
@@ -486,29 +525,23 @@ const actions = {
     releaseHeld();
     if (redo(ui.shapes, event.courses[ci])) mutate(() => {});
   },
-  split({ ci }) {
-    toggleTool("split", Number(ci));
-  },
-  movePoint() {
-    const { segmentIndex, pointIndex } = ui.menu;
-    const points = event.courses[editingIndex()].segments[segmentIndex].points;
-    // The menu would cover the ground the point is headed for, so it goes as the point is picked up.
-    ui.held = { segmentIndex, pointIndex, at: points[pointIndex] };
-    ui.menu = null;
-    ui.status = CARRY_HINT;
-    render();
+  splitSegment({ ci, si }) {
+    const course = event.courses[ci];
+    const points = course.segments[Number(si)]?.points ?? [];
+    const cut = alongPolyline(points, polylineLength(points) / 2);
+    if (!cut) return;
+    mutate(() => reshapeCourse(course, () => splitSegment(course, Number(si), cut.pointIndex, cut.latlon)));
   },
   deletePoint() {
-    reshapeAtMenu(
-      (course, { segmentIndex, pointIndex }) => deletePoint(course, segmentIndex, pointIndex),
-      "That point holds two segments together, or is the last the segment can spare.",
-    );
-  },
-  addPointHere() {
-    reshapeAtMenu(
-      (course, { segmentIndex, pointIndex, at }) => insertPoint(course, segmentIndex, pointIndex, at),
-      "There is nowhere to put a point there.",
-    );
+    const course = editedCourse();
+    const point = ui.selected;
+    if (!course || !point) return clearSelection();
+    if (!reshapeCourse(course, () => deletePoint(course, point.segmentIndex, point.pointIndex))) {
+      ui.status = "That point holds two segments together, or is the last the segment can spare.";
+      return render();
+    }
+    ui.selected = null;
+    mutate(() => {});
   },
   merge({ ci, si }) {
     const course = event.courses[ci];
@@ -617,8 +650,8 @@ const actions = {
     if (!confirm("Start over? This clears the courses, racers, settings, and fetched map data.")) return;
     event = newEvent(mapCenter(map));
     mapdata.clear();
-    Object.assign(ui, { itinerary: null, alternatives: null, tool: null, shapes: {}, editing: null, menu: null, held: null, renaming: null, status: "Draw a course to begin." });
-    localStorage.removeItem(EVENT_KEY);
+    Object.assign(ui, { itinerary: null, alternatives: null, tool: null, shapes: {}, editing: null, selected: null, hot: null, held: null, renaming: null, status: "Draw a course to begin." });
+      localStorage.removeItem(EVENT_KEY);
     invalidatePlan();
     render();
   },

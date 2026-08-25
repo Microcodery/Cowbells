@@ -1,6 +1,42 @@
 import { describe, expect, it } from "vitest";
 import { newEvent } from "../src/event.js";
-import { arrivalsAt, courseCenter, distanceAlong, largestCourse, nearestOnCourses } from "../src/geo.js";
+import { alongPolyline, arrivalsAt, courseCenter, distanceAlong, largestCourse, nearestOnCourses, polylineLength } from "../src/geo.js";
+
+/** A straight line north, a kilometre to the point. */
+const northward = (points) => Array.from({ length: points }, (_, i) => ({ lat: 45 + i / 111.195, lon: -122 }));
+
+describe("alongPolyline", () => {
+  it("finds the spot a given distance in, and the point it is past", () => {
+    const line = northward(4);
+    const { pointIndex, latlon } = alongPolyline(line, 1500);
+    expect(pointIndex, "half way along the second leg").toBe(1);
+    expect(polylineLength([line[0], latlon])).toBeCloseTo(1500, 0);
+  });
+
+  it("lands on the far end when asked for more than the line has", () => {
+    const line = northward(3);
+    const { latlon } = alongPolyline(line, 99_999);
+    expect(latlon).toEqual(line.at(-1));
+  });
+
+  it("lands on the near end when asked for nothing", () => {
+    const line = northward(3);
+    const { pointIndex, latlon } = alongPolyline(line, 0);
+    expect(pointIndex).toBe(0);
+    expect(latlon).toEqual(line[0]);
+  });
+
+  it("steps over points that sit on top of one another", () => {
+    const line = [{ lat: 45, lon: -122 }, { lat: 45, lon: -122 }, { lat: 45.01, lon: -122 }];
+    const { pointIndex } = alongPolyline(line, 500);
+    expect(pointIndex, "a leg of no length has no spot to give").toBe(1);
+  });
+
+  it("has nothing to offer a line too short to have one", () => {
+    expect(alongPolyline([{ lat: 45, lon: -122 }], 10)).toBeNull();
+    expect(alongPolyline([], 10)).toBeNull();
+  });
+});
 
 describe("hovering a course", () => {
   it("measures distance along it and predicts each racer's arrival", () => {

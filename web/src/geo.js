@@ -52,6 +52,20 @@ export const between = (a, b, fraction) => ({
   lon: a.lon + (b.lon - a.lon) * fraction,
 });
 
+/** Where `metres` along a path falls: the point it is past, and the spot itself. */
+export function alongPolyline(points, metres) {
+  if (points.length < 2) return null;
+  let along = 0;
+  for (let i = 1; i < points.length; i++) {
+    const step = metresBetween(points[i - 1], points[i]);
+    if (step > 0 && along + step >= metres) {
+      return { pointIndex: i - 1, latlon: between(points[i - 1], points[i], (metres - along) / step) };
+    }
+    along += step;
+  }
+  return { pointIndex: points.length - 2, latlon: points.at(-1) };
+}
+
 export function courseLength(course) {
   return course.segments.reduce((sum, s) => sum + polylineLength(s.points), 0);
 }

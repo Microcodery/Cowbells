@@ -151,32 +151,22 @@ export function renderHoverTip(root, hovered, unit) {
     .join("");
 }
 
-/**
- * What a click on the course being edited offers: a point can be moved or taken out, and the
- * line between points can take a new one. Snapping is remembered here but not yet applied.
- */
-export function renderMapMenu(root, menu, ui, actions) {
-  root.hidden = !menu;
-  if (!menu) {
+/** The bin for the point picked out on the course being edited, which takes it out of the course. */
+export function renderMapMenu(root, selected, actions) {
+  root.hidden = !selected;
+  if (!selected) {
+    // Focus would fall to the top of the document with the button it was on; the map keeps it.
+    if (root.contains(document.activeElement)) document.getElementById("map")?.focus({ preventScroll: true });
     root.innerHTML = "";
-    root.removeAttribute("aria-label");
     focusedMenu = null;
     return;
   }
-  const snap = (field, on, label) =>
-    `<label title="Snapping is not built yet">${label} ${toggle(field, on, "disabled")}</label>`;
-  root.setAttribute("aria-label", menu.kind === "point" ? "This point" : "This stretch of the course");
-  root.innerHTML =
-    menu.kind === "point"
-      ? `<button data-act="movePoint">Move</button>
-         <button data-act="deletePoint">Delete</button>`
-      : `<button data-act="addPointHere">Add point</button>
-         ${snap("snapRoads", ui.snap.roads, "snap to roads")}
-         ${snap("snapPaths", ui.snap.paths, "snap to paths")}`;
+  // A picked-out point keeps its own markup, so a redraw cannot take the focus off the bin.
+  if (focusedMenu === selected) return;
+  root.innerHTML = `<button data-act="deletePoint" title="Take this point out" aria-label="Take this point out">${TRASH}</button>`;
   bindActions(root, actions);
-  // Only a menu that has just opened takes focus; a redraw from a finished plan must not steal it.
-  if (focusedMenu !== menu) root.querySelector("button")?.focus({ preventScroll: true });
-  focusedMenu = menu;
+  root.querySelector("button")?.focus({ preventScroll: true });
+  focusedMenu = selected;
 }
 
 /** Clicks and changes inside `root` dispatch to `actions` by their `data-act` / `data-field`. */
@@ -331,12 +321,16 @@ function courseTools(course, ci, ui) {
   if (ui.editing !== course.id) {
     return `<div class="row"><button data-act="editCourse" data-ci="${ci}">Edit course</button></div>`;
   }
-  const tool = (kind) => ui.tool?.kind === kind && ui.tool.courseIndex === ci;
+  const snap = (field, on, label) => `<label title="Snapping is not built yet">${label} ${toggle(field, on, "disabled")}</label>`;
   return `<div class="row">
     <button data-act="undo" data-ci="${ci}" ${canUndo(ui.shapes, course) ? "" : "disabled"}>Undo</button>
     <button data-act="redo" data-ci="${ci}" ${canRedo(ui.shapes, course) ? "" : "disabled"}>Redo</button>
-    ${toolButton("split", tool("split"), "Split", "Click the course", `data-ci="${ci}"`)}
     <button data-act="editCourse" data-ci="${ci}" class="active">Done</button>
+  </div>
+  <p class="muted hint">Drag a point to move it, click it to pick it out for removal, or double click the line to add one.</p>
+  <div class="fields">
+    ${snap("snapRoads", ui.snap.roads, "snap to roads")}
+    ${snap("snapPaths", ui.snap.paths, "snap to paths")}
   </div>`;
 }
 
@@ -349,6 +343,7 @@ function segmentsSection(course, ci, ui) {
   const segment = (s, si) => `<li>
       <div class="row">
         <span class="muted">${si + 1}</span>
+        <button data-act="splitSegment" data-ci="${ci}" data-si="${si}" title="Split this stretch in half" aria-label="Split this stretch in half">split</button>
         <select data-field="segmentMode" data-ci="${ci}" data-si="${si}">${options(MODES, s.mode)}</select>
         <label title="Can spectators watch this stretch?">${toggle("viewable", s.viewable, `data-ci="${ci}" data-si="${si}"`)} viewable</label>
         <span class="muted">${distanceLabel(polylineLength(s.points), ui.unit, 1)}</span>
