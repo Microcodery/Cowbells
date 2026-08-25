@@ -68,6 +68,8 @@ const ui = {
   menu: null,
   // The point a move has taken hold of, waiting to be put down.
   held: null,
+  // The racer whose name is open for typing over.
+  renaming: null,
   // Where a new or moved point may land. Remembered now; snapping itself is still to come.
   snap: loadSnap(),
 };
@@ -367,6 +369,19 @@ const actions = {
     ui.tool = { kind: "draw", courseIndex: event.courses.length - 1 };
     render();
   },
+  endRename() {
+    if (!ui.renaming) return;
+    ui.renaming = null;
+    render();
+  },
+  renameRacer({ ri }) {
+    const racer = event.racers[ri];
+    const card = panel.querySelector(`details[data-section="racer-${racer.id}"]`);
+    // A closed card opens on the first click; the name gives way to a field only once it is open.
+    if (card && !card.open) card.open = true;
+    else ui.renaming = racer.id;
+    render();
+  },
   editCourse({ ci }) {
     const course = event.courses[ci];
     ui.editing = ui.editing === course.id ? null : course.id;
@@ -426,6 +441,7 @@ const actions = {
     mutate(() => addRacer(event, event.courses[0]));
   },
   removeRacer({ ri }) {
+    ui.renaming = null;
     mutate(() => event.racers.splice(Number(ri), 1));
   },
   splitInterval({ ri, ii }) {
@@ -524,7 +540,7 @@ const actions = {
     if (!confirm("Start over? This clears the courses, racers, settings, and fetched map data.")) return;
     event = newEvent(mapCenter(map));
     mapdata.clear();
-    Object.assign(ui, { itinerary: null, alternatives: null, tool: null, undone: {}, editing: null, menu: null, held: null, status: "Draw a course to begin." });
+    Object.assign(ui, { itinerary: null, alternatives: null, tool: null, undone: {}, editing: null, menu: null, held: null, renaming: null, status: "Draw a course to begin." });
     localStorage.removeItem(EVENT_KEY);
     invalidatePlan();
     render();
@@ -620,7 +636,10 @@ const actions = {
       segmentStart: () => moveSegmentBoundary(course, Number(si) - 1, number / ui.unit.perMetre),
       segmentEnd: () => moveSegmentBoundary(course, Number(si), number / ui.unit.perMetre),
       viewable: () => (course.segments[si].viewable = input.checked),
-      racerName: () => (racer.name = input.value),
+      racerName: () => {
+        racer.name = input.value;
+        ui.renaming = null;
+      },
       racerCourse: () => assignCourse(racer, event.courses.find((c) => c.id === input.value)),
       racerOffset: () => (racer.start_offset_s = number * 60),
       racerPriority: () => (racer.priority = number),

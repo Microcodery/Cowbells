@@ -188,18 +188,12 @@ body {
 .card > summary > .name {
   font-weight: 700;
   padding: 2px 6px;
+  border: 1px solid transparent;
+  border-radius: 8px;
 }
 
-.card > summary > .rename {
-  display: none;
-}
-
-.card[open] > summary > .name {
-  display: none;
-}
-
-.card[open] > summary > .rename {
-  display: inline-block;
+.card[open] > summary > .name:hover {
+  border-color: var(--border);
 }
 
 /* Nothing to remove until you have opened what you would be removing. */

@@ -16,12 +16,12 @@ const panels = new WeakMap();
 function panelState(root) {
   let state = panels.get(root);
   if (!state) {
-    state = { editingTime: false, pendingRender: null, actions: null };
+    state = { editingTime: false, pendingRender: null, actions: null, renaming: null };
     panels.set(root, state);
     trackTimeEditing(root, state);
     trackGhostDismissal(root);
     trackDialogs(root, state);
-    trackNestedFolds(root);
+    trackNestedFolds(root, state);
   }
   return state;
 }
@@ -71,6 +71,14 @@ export function renderPanel(root, event, ui, actions) {
     if (folds.has(details.dataset.section)) details.open = folds.get(details.dataset.section);
   }
   root.scrollTop = scroll;
+  // A name that has just opened for typing takes the focus with all of it selected, ready to be
+  // replaced. Later renders rebuild the same field, so only the first one may select it.
+  const renaming = root.querySelector("input.rename");
+  if (renaming && state.renaming !== ui.renaming) {
+    renaming.focus({ preventScroll: true });
+    renaming.select();
+  }
+  state.renaming = ui.renaming;
   // Opening first: showModal moves focus to the dialog, so restoring it afterwards wins.
   if (openedDialog) openDialog(root, openedDialog);
   if (focused) root.querySelector(focused)?.focus({ preventScroll: true });
@@ -171,6 +179,12 @@ function bindActions(root, actions) {
       e.preventDefault();
     }
   };
+  root.onkeydown = (e) => {
+    const target = e.target.closest?.("[data-act][tabindex]");
+    if (!target || (e.key !== "Enter" && e.key !== " ")) return;
+    e.preventDefault();
+    target.click();
+  };
   root.onchange = (e) => {
     const { act, field } = e.target.dataset;
     if (act) actions[act](e.target.dataset, e.target);
@@ -192,6 +206,7 @@ function trackTimeEditing(root, state) {
     state.editingTime = e.target.type === "time";
   });
   root.addEventListener("focusout", (e) => {
+    if (e.target.matches("input.rename")) state.actions?.endRename();
     if (e.target.type !== "time") return;
     state.editingTime = false;
     const deferred = state.pendingRender;
@@ -204,11 +219,12 @@ function trackTimeEditing(root, state) {
  * Closing a fold closes what is inside it, so reopening shows the same tidy view every time.
  * `toggle` does not bubble, so the panel listens for it on the way down.
  */
-function trackNestedFolds(root) {
+function trackNestedFolds(root, state) {
   root.addEventListener(
     "toggle",
     (e) => {
       if (e.target.open) return;
+      if (e.target.querySelector("input.rename")) state.actions?.endRename();
       for (const nested of e.target.querySelectorAll("details")) nested.open = false;
     },
     true,
@@ -354,8 +370,11 @@ function racerCard(racer, ri, event, ui) {
   const course = event.courses.find((c) => c.id === racer.course_id)?.name ?? "";
   return `<details class="card" data-section="racer-${racer.id}" open>
     <summary>
-      <span class="name">${esc(racer.name)}</span>
-      <input class="rename" data-field="racerName" data-ri="${ri}" value="${esc(racer.name)}" aria-label="Racer name">
+      ${
+        ui.renaming === racer.id
+          ? `<input class="rename" data-field="racerName" data-ri="${ri}" value="${esc(racer.name)}" aria-label="Racer name">`
+          : `<span class="name" data-act="renameRacer" data-ri="${ri}" tabindex="0" role="button" title="Rename">${esc(racer.name)}</span>`
+      }
       <span class="muted">${esc(course)} · ${paceLabel(averagePace(racer), ui.unit)}/${ui.unit.label}</span>
       <button data-act="removeRacer" data-ri="${ri}" title="Remove racer" aria-label="Remove racer">${TRASH}</button>
     </summary>
