@@ -157,7 +157,6 @@ SpectatorConfig
   safety_buffer       # minutes; default ~2
   required_regions: [RequiredRegion]
   priority_tiers      # ordered; see §5.2
-  repeat_curve_steepness
 ```
 
 Both anchors are optional — with neither, the planner decides where to start and end.
@@ -286,11 +285,11 @@ is just another candidate viewpoint whose windows happen to be each racer's fini
 This separation matters because finishers spread out — you can catch an early finisher,
 wander off, and come back.
 
-**One user-facing dial: curve steepness.**
-- Steep → breadth (see everybody once)
-- Shallow → depth (camp out, watch fewer people repeatedly)
-
-Plus optional per-racer weights.
+**Repeats decay by half, and the dials are per racer.** Each racer carries a `prefer`
+(the finish, or once during the race then the finish, or during always), a priority, and a
+`require_finish` that charges a plan more than any level earns when that finish is missed.
+Breadth against depth follows from those: what a repeat is worth is fixed, so which racers
+matter, and in what way, is said about the racers themselves.
 
 ### 5.2 Priority tiers (lexicographic)
 

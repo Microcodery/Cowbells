@@ -1,7 +1,7 @@
 //! Wires the pieces together and turns a plan back into a human-facing itinerary.
 
 use cowbells_core::geom::{Point, Projection};
-use cowbells_core::{Event, LatLon, Seconds};
+use cowbells_core::{Event, LatLon, RacerId, Seconds};
 use cowbells_routing::{NodeId, TravelTime};
 use fixedbitset::FixedBitSet;
 use geo::{Distance, Euclidean};
@@ -53,6 +53,8 @@ pub struct Itinerary {
     pub score: f64,
     pub unseen: Vec<String>,
     /// Indices into `spectator.required_regions`.
+    /// Ids of racers who required their finish and did not get it.
+    pub unmet_finishes: Vec<RacerId>,
     pub unmet_regions: Vec<usize>,
 }
 
@@ -197,7 +199,16 @@ pub fn solve_with(
         .filter(|r| !stops.iter().any(|s| s.seen.iter().any(|seen| seen.racer_id == r.id)))
         .map(|r| r.id.clone())
         .collect();
-    Ok(Itinerary { stops, legs, score: result.score, unseen, unmet_regions: result.unmet_regions })
+    let unmet_finishes =
+        result.unmet_finishes.iter().map(|&r| event.racers[r].id.clone()).collect();
+    Ok(Itinerary {
+        stops,
+        legs,
+        score: result.score,
+        unseen,
+        unmet_finishes,
+        unmet_regions: result.unmet_regions,
+    })
 }
 
 #[cfg(test)]

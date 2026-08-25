@@ -86,8 +86,9 @@ pub(crate) fn weights(racers: usize, max_priority: f64) -> Weights {
     }
 }
 
-/// Ten times the most a single level can be worth, so the scalar stays exact in f64 for
-/// fields of hundreds of racers.
+/// Ten times the most a single level can be worth. The penalties are the sixth and fifth
+/// powers of it, so f64 holds every level apart for fields of a few dozen racers; beyond that
+/// the smallest levels blur into a missed requirement, which still ranks the plan correctly.
 pub(crate) fn level_base(racers: usize, max_priority: f64) -> f64 {
     let repeats = 1.0 / (1.0 - REPEAT_DECAY);
     let most = (racers.max(1) as f64 * max_priority.max(1.0) * repeats).max(1.0);
@@ -124,6 +125,8 @@ pub struct Plan {
     /// Begins at the start anchor when there is one and ends at the end anchor when there is one.
     pub stops: Vec<Stop>,
     pub score: f64,
+    /// Racers who required their finish and did not get it.
+    pub unmet_finishes: Vec<usize>,
     /// Indices of required regions no stop falls inside.
     pub unmet_regions: Vec<usize>,
 }
@@ -145,7 +148,7 @@ pub fn plan_with(
 ) -> Plan {
     let (racers, top) = (problem.priorities.len(), max_priority(problem));
     let field: Vec<usize> = (0..racers).filter(|&r| problem.priorities[r] > 0.0).collect();
-    let required = field.iter().copied().filter(|&r| problem.require_finish[r]).collect();
+    let required: Vec<usize> = (0..racers).filter(|&r| problem.require_finish[r]).collect();
     let mut search = Search {
         problem,
         options,
@@ -547,6 +550,7 @@ impl Search<'_> {
             return Plan {
                 stops: Vec::new(),
                 score: 0.0,
+                unmet_finishes: self.required.clone(),
                 unmet_regions: (0..self.problem.regions.len()).collect(),
             };
         };
@@ -576,7 +580,9 @@ impl Search<'_> {
         }
         let unmet_regions =
             (0..self.problem.regions.len()).filter(|&i| !chosen.regions_done.contains(i)).collect();
-        Plan { stops, score: chosen.score, unmet_regions }
+        let unmet_finishes =
+            self.required.iter().copied().filter(|&r| !chosen.finished.contains(r)).collect();
+        Plan { stops, score: chosen.score, unmet_finishes, unmet_regions }
     }
 }
 
@@ -721,6 +727,44 @@ mod tests {
             FINISH * FINISH * FINISH + 2.0 * FINISH,
             "the finishes, plus everyone finished"
         );
+    }
+
+    /// Only racer 1 requires their finish, and the two finishes are at exclusive spots, so the
+    /// plan gives up racer 0's finish for the one it was told it may not miss.
+    #[test]
+    fn one_racer_can_require_a_finish_the_other_gives_up() {
+        let mut problem =
+            line(vec![vec![], vec![finish(0, 20.0, 21.0)], vec![finish(1, 20.0, 21.0)]]);
+        problem.require_finish = vec![false, true];
+        let second = plan(&problem, Options::default());
+        assert_eq!(second.stops.last().unwrap().viewpoint, 2);
+        assert!(second.unmet_finishes.is_empty(), "the required finish was caught");
+
+        problem.require_finish = vec![true, false];
+        let flipped = plan(&problem, Options::default());
+        assert_eq!(flipped.stops.last().unwrap().viewpoint, 1, "the requirement moved with it");
+        assert!(flipped.unmet_finishes.is_empty());
+    }
+
+    /// A requirement belongs to the racer, not to their priority: zero priority keeps it out of
+    /// "everyone" without excusing the plan from their finish.
+    #[test]
+    fn a_zero_priority_racer_can_still_require_their_finish() {
+        let mut problem =
+            line(vec![vec![], vec![sighting(0, 10.0, 12.0)], vec![finish(1, 20.0, 21.0)]]);
+        problem.priorities = vec![1.0, 0.0];
+        problem.require_finish = vec![false, true];
+        let plan = plan(&problem, Options::default());
+        assert_eq!(plan.stops.last().unwrap().viewpoint, 2, "it goes for the required finish");
+        assert!(plan.unmet_finishes.is_empty());
+    }
+
+    #[test]
+    fn an_unreachable_required_finish_is_reported() {
+        let mut problem = line(vec![vec![], vec![sighting(0, 10.0, 12.0)]]);
+        problem.require_finish = vec![true, false];
+        let plan = plan(&problem, Options::default());
+        assert_eq!(plan.unmet_finishes, vec![0], "no finish is offered anywhere");
     }
 
     #[test]
