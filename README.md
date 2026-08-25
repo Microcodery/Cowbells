@@ -18,14 +18,14 @@ Runs entirely in the browser as a static page: no account, no backend.
   profile over distance (with ±uncertainty per interval), and a priority.
 - **Spectator:** optional start point, day window, optional end point and
   deadline, must-visit areas, walk/bike/drive at your own pace; tunable
-  sighting radius, safety buffer, minimum stop, viewpoint spacing, how much
-  of each course's crowded start to skip (a mile by default), and a
-  breadth-vs-depth dial. Distances and paces display in km or miles.
+  sighting radius, safety buffer, minimum stop, viewpoint spacing, and how
+  much of each course's crowded start to skip (a mile by default). Distances
+  and paces display in miles or km.
 - **Map:** courses drawn with start/finish markers and direction arrows;
   stretches shared by several courses striped in their colours. After each
   plan the engine streams its progress to the map — viewpoints, clustering,
-  then the search with the best plan so far lit up — paced to take at least
-  three seconds so there is always something to watch.
+  then the search with the best plan so far lit up — paced so there is always
+  something to watch.
 - **Routing:** OpenStreetMap roads and paths fetched on demand; never crosses
   water or buildings; straight lines allowed through parks and open areas.
   Roads the race runs on are off limits to the spectator, who keeps to
@@ -38,15 +38,15 @@ Runs entirely in the browser as a static page: no account, no backend.
   prefer (per racer: the finish — the default — or once during the race,
   then the finish, or during always), then everyone's
   finish, then each preferred sighting, then each other sighting, then repeats
-  (with diminishing returns). "Require every finish" makes a missed finish
-  outweigh everything else.
+  (with diminishing returns). A racer marked "require their finish" makes
+  missing that finish outweigh everything else.
 - **Results:** numbered stops on the map with arrive/leave times and who you'll
   see; unseen racers and unreachable areas called out. Once a plan is shown,
   looser settings (moving faster, a shorter safety buffer, no minimum stop)
   are tried in the background and offered when they do clearly better.
 - **Files:** save/load the whole event as a `.bird` file; export the
   spectator's itinerary as GPX (a track plus a waypoint per stop).
-- **Examples:** sample `.bird` events in the header dropdown, map data
+- **Examples:** sample `.bird` events behind the Load button, map data
   included — a 5K, 10K, and half marathon lapping Denver's City Park with
   five racers; a 7.8 km zigzag through Uptown and City Park West that folds
   past itself at four corners, with six racers; and the Denver Colfax

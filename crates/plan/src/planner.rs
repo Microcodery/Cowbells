@@ -10,7 +10,7 @@
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 
-use cowbells_core::{Objective, Prefer, Seconds};
+use cowbells_core::{Prefer, Seconds};
 use fixedbitset::FixedBitSet;
 
 use crate::trace::LabelEvent;
@@ -18,6 +18,10 @@ use crate::viewpoints::{Kind, Sighting};
 
 /// Search events are handed to the sink in batches of this many.
 const EVENT_BATCH: usize = 2_000;
+
+/// What each repeat sighting of a racer is worth against the one before it: half, so a
+/// second look is a bonus and never rivals a first sighting of somebody else.
+const REPEAT_DECAY: f64 = 0.5;
 
 /// Everything the search reads: sightings per viewpoint, how long it takes to move between
 /// them, and the constraints on the day. Geometry stays with the caller.
@@ -37,7 +41,8 @@ pub struct Problem {
     pub priorities: Vec<f64>,
     /// Per racer, which kind of sighting matters most.
     pub prefer: Vec<Prefer>,
-    pub objective: Objective,
+    /// Per racer, whether a plan that misses their finish should be charged for it.
+    pub require_finish: Vec<bool>,
     pub regions: Vec<Region>,
 }
 
@@ -54,38 +59,37 @@ pub struct Region {
 pub(crate) struct Weights {
     /// Bonus once every racer has had their preferred sighting.
     everyone_preferred: f64,
-    /// Bonus once every racer's finish has been seen; zero when finishes are required instead.
+    /// Bonus once every racer's finish has been seen.
     everyone_finished: f64,
     /// A racer's first sighting of their preferred kind, scaled by priority.
     preferred: f64,
     /// A racer's first sighting of the other kind, scaled by priority.
     other: f64,
-    /// The `k`-th en-route sighting of a racer is worth `priority × repeat_decay^k` of this.
+    /// The `k`-th en-route sighting of a racer is worth `priority × REPEAT_DECAY^k` of this.
     repeat: f64,
-    /// Charged per finish missed when finishes are required: more than every level earns.
+    /// Charged per racer who required their finish and did not get it: more than every level earns.
     missed_finish: f64,
     /// Charged per required region missed: more than every level and every finish could earn.
     missed_region: f64,
 }
 
-pub(crate) fn weights(objective: &Objective, racers: usize, max_priority: f64) -> Weights {
-    let level = level_base(objective, racers, max_priority);
-    let required = objective.require_finishes;
+pub(crate) fn weights(racers: usize, max_priority: f64) -> Weights {
+    let level = level_base(racers, max_priority);
     Weights {
         everyone_preferred: level.powi(4),
-        everyone_finished: if required { 0.0 } else { level.powi(3) },
+        everyone_finished: level.powi(3),
         preferred: level.powi(2),
         other: level,
         repeat: 1.0,
-        missed_finish: if required { level.powi(5) } else { 0.0 },
+        missed_finish: level.powi(5),
         missed_region: level.powi(6),
     }
 }
 
 /// Ten times the most a single level can be worth, so the scalar stays exact in f64 for
 /// fields of hundreds of racers.
-pub(crate) fn level_base(objective: &Objective, racers: usize, max_priority: f64) -> f64 {
-    let repeats = 1.0 / (1.0 - objective.repeat_decay.clamp(0.0, 0.9));
+pub(crate) fn level_base(racers: usize, max_priority: f64) -> f64 {
+    let repeats = 1.0 / (1.0 - REPEAT_DECAY);
     let most = (racers.max(1) as f64 * max_priority.max(1.0) * repeats).max(1.0);
     (10.0 * most).ceil()
 }
@@ -140,12 +144,15 @@ pub fn plan_with(
     sink: &mut dyn FnMut(Vec<LabelEvent>),
 ) -> Plan {
     let (racers, top) = (problem.priorities.len(), max_priority(problem));
+    let field: Vec<usize> = (0..racers).filter(|&r| problem.priorities[r] > 0.0).collect();
+    let required = field.iter().copied().filter(|&r| problem.require_finish[r]).collect();
     let mut search = Search {
         problem,
         options,
         sink,
-        weights: weights(&problem.objective, racers, top),
-        field: (0..racers).filter(|&r| problem.priorities[r] > 0.0).collect(),
+        weights: weights(racers, top),
+        field,
+        required,
         labels: Vec::new(),
         kept: vec![Vec::new(); problem.sightings.len()],
         queue: BinaryHeap::new(),
@@ -262,6 +269,8 @@ struct Search<'a> {
     weights: Weights,
     /// Racers with positive priority: the ones "everyone" means.
     field: Vec<usize>,
+    /// Racers of the field who asked for their finish to be seen.
+    required: Vec<usize>,
     labels: Vec<Label>,
     /// Surviving label indices per viewpoint, for dominance and the beam.
     kept: Vec<Vec<usize>>,
@@ -460,11 +469,7 @@ impl Search<'_> {
         if !first {
             return match sighting.kind {
                 Kind::Finish => 0.0,
-                Kind::Pass => {
-                    priority
-                        * w.repeat
-                        * self.problem.objective.repeat_decay.powi(label.seen[racer] as i32)
-                }
+                Kind::Pass => priority * w.repeat * REPEAT_DECAY.powi(label.seen[racer] as i32),
             };
         }
         let preferred = self.prefers(racer, sighting.kind);
@@ -474,8 +479,7 @@ impl Search<'_> {
                 (true, _) => w.preferred,
                 // Worth less than the next pass would be: never preferred to seeing them run again.
                 (false, Kind::Finish) if en_route_only => {
-                    w.repeat
-                        * self.problem.objective.repeat_decay.powi(label.seen[racer] as i32 + 1)
+                    w.repeat * REPEAT_DECAY.powi(label.seen[racer] as i32 + 1)
                 }
                 (false, _) => w.other,
             };
@@ -517,7 +521,8 @@ impl Search<'_> {
     /// required finish missed, then each required region missed, costs more than any level.
     fn rank(&self, label: &Label) -> f64 {
         let regions = (self.problem.regions.len() - label.regions_done.count_ones(..)) as f64;
-        let finishes = (self.field.len() - self.finished_of_field(label)) as f64;
+        let finishes =
+            self.required.iter().filter(|&&r| !label.finished.contains(r)).count() as f64;
         label.score - self.weights.missed_finish * finishes - self.weights.missed_region * regions
     }
 
@@ -596,22 +601,20 @@ mod tests {
 
     #[test]
     fn weights_separate_levels() {
-        let objective = Objective::default();
         assert_eq!(
-            level_base(&objective, 1, 1.0),
+            level_base(1, 1.0),
             20.0,
             "one racer, decay 0.5: at most 2 points per level, times ten"
         );
-        let w = weights(&objective, 1, 1.0);
+        let w = weights(1, 1.0);
         assert_eq!(w.everyone_preferred, 160_000.0);
         assert_eq!(w.everyone_finished, 8_000.0);
         assert_eq!(w.preferred, 400.0);
         assert_eq!(w.other, 20.0);
-        assert_eq!((w.repeat, w.missed_finish), (1.0, 0.0));
+        assert_eq!(w.repeat, 1.0);
+        assert_eq!(w.missed_finish, 3_200_000.0, "a required finish outweighs every level");
         assert_eq!(w.missed_region, 64_000_000.0);
-        let required = weights(&Objective { require_finishes: true, ..objective }, 1, 1.0);
-        assert_eq!((required.everyone_finished, required.missed_finish), (0.0, 3_200_000.0));
-        assert_eq!(level_base(&objective, 30, 1.0), 600.0);
+        assert_eq!(level_base(30, 1.0), 600.0);
     }
 
     /// Two racers of priority 1 at decay 0.5 give a level of 40; both are neutral, so a first
@@ -637,7 +640,7 @@ mod tests {
             min_stop: 0.0,
             priorities: vec![1.0, 1.0],
             prefer: vec![Prefer::Neutral, Prefer::Neutral],
-            objective: Objective::default(),
+            require_finish: vec![false, false],
             regions: Vec::new(),
         }
     }
@@ -710,10 +713,14 @@ mod tests {
         );
 
         problem.prefer = vec![Prefer::Neutral, Prefer::Neutral];
-        problem.objective.require_finishes = true;
+        problem.require_finish = vec![true, true];
         let required = plan(&problem, Options::default());
         assert_eq!(required.stops.last().unwrap().viewpoint, 2, "missing a finish costs too much");
-        assert_eq!(required.score, 2.0 * FINISH);
+        assert_eq!(
+            required.score,
+            FINISH * FINISH * FINISH + 2.0 * FINISH,
+            "the finishes, plus everyone finished"
+        );
     }
 
     #[test]

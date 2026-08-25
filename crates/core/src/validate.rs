@@ -30,8 +30,6 @@ pub enum ValidationError {
     Uncertainty { racer: String, index: usize },
     #[error("racer {racer} priority must be zero or more")]
     Priority { racer: String },
-    #[error("repeat decay must be in [0, 1)")]
-    RepeatDecay,
     #[error("the day must end after it starts")]
     DayWindow,
     #[error("spectator speed must be positive and finite")]
@@ -60,9 +58,6 @@ impl Event {
 }
 
 fn check_spectator(spectator: &SpectatorConfig, errors: &mut Vec<ValidationError>) {
-    if !(0.0..1.0).contains(&spectator.objective.repeat_decay) {
-        errors.push(ValidationError::RepeatDecay);
-    }
     let mut ends = spectator.latest.into_iter().chain(spectator.end.map(|e| e.latest));
     if ends.any(|t| t < spectator.earliest) {
         errors.push(ValidationError::DayWindow);
@@ -211,6 +206,7 @@ mod tests {
                 start_offset_s: 0.0,
                 pace_profile,
                 priority: 1.0,
+                require_finish: false,
                 prefer: Prefer::EnRoute,
             }],
             spectator: SpectatorConfig {
@@ -227,7 +223,6 @@ mod tests {
                 viewpoint_spacing_m: 120.0,
                 course_closed: false,
                 required_regions: vec![],
-                objective: Objective::default(),
             },
         }
     }
@@ -286,7 +281,6 @@ mod tests {
     fn spectator_settings_are_checked() {
         let mut e =
             event(vec![segment("a", &[0.0, 1.0])], vec![interval(0.0, 1000.0, 300.0, 0.05)], "c");
-        e.spectator.objective.repeat_decay = 1.5;
         e.spectator.latest = Some(-1);
         e.spectator.speed_mps = Some(0.0);
         e.spectator.skip_start_m = -1.0;
@@ -294,7 +288,6 @@ mod tests {
         assert_eq!(
             e.validate(),
             Err(vec![
-                ValidationError::RepeatDecay,
                 ValidationError::DayWindow,
                 ValidationError::Speed,
                 ValidationError::SkipStart,

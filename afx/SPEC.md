@@ -58,7 +58,7 @@ It runs entirely in the browser as a static web page. No account, no server-side
 - Optional end of day ("until") and optional end location with a latest arrival (e.g. "be at the finish by noon").
 - **Must-visit areas**: circles on the map (optionally time-windowed) the itinerary should include. Soft — an unreachable area is reported, not fatal.
 - Movement mode: walk, bike, drive. One mode per plan.
-- **Objective**: ordered priority tiers — en-route sightings, then finishes (or the reverse) — and a breadth↔depth dial: how much each repeat sighting of a racer is worth relative to the previous one.
+- **Objective**: ordered priority tiers — en-route sightings, then finishes (or the reverse) — set per racer, with a finish they can require outright.
 - Settings with defaults:
   - Sighting radius (30 m)
   - Safety buffer: be in place this long before a racer could possibly appear (2 min)

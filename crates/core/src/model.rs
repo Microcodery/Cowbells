@@ -98,6 +98,9 @@ pub struct Racer {
     pub pace_profile: Vec<PaceInterval>,
     #[serde(default = "default_priority")]
     pub priority: f64,
+    /// Their finish must be seen: a plan that misses it is charged more than any level earns.
+    #[serde(default)]
+    pub require_finish: bool,
     /// Which sighting of this racer the spectator cares about most.
     #[serde(default)]
     pub prefer: Prefer,
@@ -158,8 +161,6 @@ pub struct SpectatorConfig {
     pub course_closed: bool,
     #[serde(default)]
     pub required_regions: Vec<RequiredRegion>,
-    #[serde(default)]
-    pub objective: Objective,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -176,26 +177,6 @@ pub struct RequiredRegion {
     /// Be there no later than this.
     #[serde(default)]
     pub latest: Option<Timestamp>,
-}
-
-/// What a plan is worth, in strict priority: everyone seen the way they prefer, then everyone's
-/// finish, then each racer's preferred sighting, then their other kind, then repeats on a
-/// decaying curve (where a finish for a racer who only cares about en route also sits).
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub struct Objective {
-    /// Every finish must be seen: a plan missing one is charged more than any level earns.
-    #[serde(default)]
-    pub require_finishes: bool,
-    /// Each repeat en-route sighting of a racer is worth this fraction of the previous one:
-    /// 0 is pure breadth (see everybody once), 0.9 is nearly pure depth. Must stay below 1 so
-    /// repeats can never add up to a first sighting.
-    pub repeat_decay: f64,
-}
-
-impl Default for Objective {
-    fn default() -> Self {
-        Self { require_finishes: false, repeat_decay: 0.5 }
-    }
 }
 
 fn default_viewable() -> bool {
@@ -251,7 +232,6 @@ mod tests {
         assert_eq!(event.racers[0].pace_profile[0].uncertainty, 0.05);
         assert!(event.courses[0].segments[0].viewable);
         assert_eq!(event.spectator.start, None);
-        assert_eq!(event.spectator.objective, Objective::default());
 
         let again: Event = serde_json::from_str(&serde_json::to_string(&event).unwrap()).unwrap();
         assert_eq!(again, event);

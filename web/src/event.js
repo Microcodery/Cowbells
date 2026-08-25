@@ -29,7 +29,6 @@ export function newEvent(center) {
       viewpoint_spacing_m: 120,
       course_closed: false,
       required_regions: [],
-      objective: { require_finishes: false, repeat_decay: 0.5 },
     },
   };
 }
@@ -93,6 +92,7 @@ export function addRacer(event, course) {
     pace_profile: seedProfile(course),
     priority: 1,
     prefer: "finish",
+    require_finish: false,
   };
   event.racers.push(racer);
   return racer;

@@ -74,7 +74,8 @@ body {
   overflow-y: auto;
   background: var(--panel);
   border-right: 1px solid var(--border);
-  padding: 0 12px 24px;
+  /* Room at the foot for the flask, which floats over anything it would otherwise cover. */
+  padding: 0 12px 44px;
 }
 
 #map {
@@ -397,6 +398,34 @@ details.section > summary h2 {
   margin: 12px 0 6px;
 }
 
+/* The way into the debug settings, kept at the foot of the panel and out of the way. */
+.lab {
+  position: sticky;
+  bottom: 8px;
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 12px;
+  pointer-events: none;
+}
+
+.lab button {
+  pointer-events: auto;
+  color: var(--muted);
+  border-color: transparent;
+  opacity: 0.6;
+}
+
+.lab button:hover,
+.lab button:focus-visible {
+  color: var(--fg);
+  border-color: var(--border);
+  opacity: 1;
+}
+
+dialog[data-dialog] h2 {
+  margin: 0 0 12px;
+}
+
 dialog[data-dialog] {
   width: min(23rem, 90vw);
   padding: 42px 20px 20px;
@@ -511,10 +540,54 @@ details.advanced[open] > summary {
   margin-bottom: 8px;
 }
 
-.fields > label > input[type="checkbox"] {
+.fields > label > input[type="checkbox"]:not(.toggle) {
   flex: 0 0 auto;
   width: 1.1em;
   height: 1.1em;
+}
+
+/* An on/off field reads as a slider: grey when off, green when on. */
+input[type="checkbox"].toggle {
+  appearance: none;
+  flex: 0 0 auto;
+  position: relative;
+  width: 40px;
+  height: 24px;
+  min-height: 24px;
+  padding: 0;
+  border-radius: 999px;
+  background: var(--border);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+
+input[type="checkbox"].toggle::after {
+  content: "";
+  position: absolute;
+  top: 1px;
+  left: 1px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--panel);
+  transition: transform 120ms ease;
+}
+
+input[type="checkbox"].toggle:checked {
+  background: var(--ok);
+  border-color: var(--ok);
+}
+
+input[type="checkbox"].toggle:checked::after {
+  transform: translateX(16px);
+}
+
+/* High contrast paints over the track and the knob alike; a solid knob keeps the state readable. */
+@media (forced-colors: active) {
+  input[type="checkbox"].toggle::after {
+    background: CanvasText;
+  }
 }
 
 .muted {

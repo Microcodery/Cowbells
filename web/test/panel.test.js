@@ -32,12 +32,22 @@ describe("the load dialog", () => {
     document.body.append(root);
     renderPanel(root, newEvent({ lat: 45, lon: -122 }), ui, {});
     expect(root.querySelector("select[data-act=example]"), "the dropdown moved into the dialog").toBeNull();
-    expect(root.querySelector("button[data-act=openLoad]")).not.toBeNull();
+    expect(root.querySelector("button[data-act=showDialog][data-dialog=load]")).not.toBeNull();
 
     const dialog = root.querySelector("dialog[data-dialog=load]");
     expect(dialog.querySelector("[data-dropzone] input[type=file]").accept).toContain(".bird");
     const examples = [...dialog.querySelectorAll("button[data-act=example]")].map((b) => b.dataset.example);
     expect(examples).toEqual(["three-distances", "uptown-ladder", "colfax"]);
+    root.remove();
+  });
+
+  it("keeps the debug tunables out of the panel, behind the flask", () => {
+    const root = document.createElement("div");
+    document.body.append(root);
+    renderPanel(root, newEvent({ lat: 45, lon: -122 }), ui, {});
+    expect(root.querySelector("details[data-section=debug]"), "debug is no longer a section").toBeNull();
+    expect(root.querySelector(".lab button[data-act=showDialog][data-dialog=debug]")).not.toBeNull();
+    expect(root.querySelector("dialog[data-dialog=debug] input[data-field=debug]")).not.toBeNull();
     root.remove();
   });
 

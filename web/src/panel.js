@@ -20,7 +20,7 @@ function panelState(root) {
     panels.set(root, state);
     trackTimeEditing(root, state);
     trackGhostDismissal(root);
-    trackLoadDialog(root, state);
+    trackDialogs(root, state);
   }
   return state;
 }
@@ -41,14 +41,14 @@ export function renderPanel(root, event, ui, actions) {
   const folds = new Map([...root.querySelectorAll("details[data-section]")].map((d) => [d.dataset.section, d.open]));
   const scroll = root.scrollTop;
   const focused = root.contains(document.activeElement) ? selectorFor(document.activeElement) : null;
-  const loadWasOpen = Boolean(root.querySelector(LOAD_DIALOG)?.open);
+  const openedDialog = root.querySelector("dialog[open]")?.dataset.dialog ?? null;
   measureGhost(root, ui.itinerary);
   root.innerHTML = `
     ${ui.banner ? `<div class="banner">${ui.banner} <a href="${RELEASES}" target="_blank" rel="noopener">Run it yourself</a> <button data-act="dismissBanner" title="Dismiss">✕</button></div>` : ""}
     <section>
       <div class="row">
         <button data-act="save" title="Save event as .bird">Save</button>
-        <button data-act="openLoad" title="Open an event or an example" ${ui.busy ? "disabled" : ""}>Load</button>
+        <button data-act="showDialog" data-dialog="load" title="Open an event or an example" ${ui.busy ? "disabled" : ""}>Load</button>
         <button data-act="reset" title="Start over with an empty event" ${ui.busy ? "disabled" : ""}>Reset</button>
       </div>
       ${loadDialog(ui)}
@@ -58,23 +58,24 @@ export function renderPanel(root, event, ui, actions) {
     ${racersSection(event, ui)}
     ${spectatorSection(event, ui)}
     ${settingsSection(event, ui)}
-    ${debugSection(ui)}
     <section>
       <h2>Results</h2>
       <p class="muted"><span data-status>${esc(ui.status)}</span></p>
       ${ui.itinerary ? `<div data-results>${results(ui.itinerary, event, ui)}</div>` : ghost()}
-    </section>`;
+    </section>
+    ${debugDialog(ui)}
+    <div class="lab">
+      <button data-act="showDialog" data-dialog="debug" title="Debug settings" aria-label="Debug settings">${FLASK}</button>
+    </div>`;
   for (const details of root.querySelectorAll("details[data-section]")) {
     if (folds.has(details.dataset.section)) details.open = folds.get(details.dataset.section);
   }
   root.scrollTop = scroll;
   // Opening first: showModal moves focus to the dialog, so restoring it afterwards wins.
-  if (loadWasOpen) openLoadDialog(root);
+  if (openedDialog) openDialog(root, openedDialog);
   if (focused) root.querySelector(focused)?.focus({ preventScroll: true });
   bindActions(root, actions);
 }
-
-const LOAD_DIALOG = "dialog[data-dialog=load]";
 
 const EXAMPLES = [
   { name: "three-distances", label: "City Park 5K · 10K · half" },
@@ -87,7 +88,7 @@ function loadDialog(ui) {
   const example = ({ name, label }) =>
     `<li><button data-act="example" data-example="${name}" ${ui.busy ? "disabled" : ""}>${esc(label)}</button></li>`;
   return `<dialog data-dialog="load" aria-label="Open an event">
-    <button data-act="closeLoad" class="dismiss" title="Close" aria-label="Close">✕</button>
+    <button data-act="hideDialog" data-dialog="load" class="dismiss" title="Close" aria-label="Close">✕</button>
     <label class="dropzone" data-dropzone>
       <input type="file" accept=".bird,.json" data-act="load" class="offscreen" ${ui.busy ? "disabled" : ""}>
       <b>Drop an event here</b>
@@ -98,8 +99,9 @@ function loadDialog(ui) {
   </dialog>`;
 }
 
-export const openLoadDialog = (root) => root.querySelector(LOAD_DIALOG)?.showModal();
-export const closeLoadDialog = (root) => root.querySelector(LOAD_DIALOG)?.close();
+const dialogNamed = (root, name) => root.querySelector(`dialog[data-dialog="${name}"]`);
+export const openDialog = (root, name) => dialogNamed(root, name)?.showModal();
+export const closeDialog = (root, name) => dialogNamed(root, name)?.close();
 
 /** The bar that stays put: name, the Plan button, theme, and on phones the panel toggle. */
 export function renderHeader(root, event, ui, actions) {
@@ -168,8 +170,8 @@ function trackTimeEditing(root, state) {
   });
 }
 
-/** The load dialog's own gestures: dropping a file on it, and clicking its backdrop to dismiss. */
-function trackLoadDialog(root, state) {
+/** Gestures the dialogs answer to: a file dropped on a drop zone, and a backdrop click to dismiss. */
+function trackDialogs(root, state) {
   const dropzone = (target) => target.closest?.("[data-dropzone]");
   root.addEventListener("dragover", (e) => {
     const zone = dropzone(e.target);
@@ -192,7 +194,7 @@ function trackLoadDialog(root, state) {
   });
   // A click lands on the dialog itself both on its backdrop and in its padding; only the backdrop closes.
   root.addEventListener("click", (e) => {
-    if (!e.target.matches(LOAD_DIALOG)) return;
+    if (!e.target.matches("dialog[data-dialog]")) return;
     const card = e.target.getBoundingClientRect();
     const inside = e.clientX >= card.left && e.clientX <= card.right && e.clientY >= card.top && e.clientY <= card.bottom;
     if (!inside) e.target.close();
@@ -250,7 +252,7 @@ function coursesSection(event, ui) {
           .map(
             (s, si) => `<li>
           <select data-field="segmentMode" data-ci="${ci}" data-si="${si}">${options(MODES, s.mode)}</select>
-          <label title="Can spectators watch this stretch?"><input type="checkbox" data-field="viewable" data-ci="${ci}" data-si="${si}" ${s.viewable ? "checked" : ""}> viewable</label>
+          <label title="Can spectators watch this stretch?">${toggle("viewable", s.viewable, `data-ci="${ci}" data-si="${si}"`)} viewable</label>
           <span class="muted">${s.points.length} pts</span>
           ${si + 1 < course.segments.length ? `<button data-act="merge" data-ci="${ci}" data-si="${si}">merge ↓</button>` : ""}
         </li>`,
@@ -302,6 +304,7 @@ function racerAdvanced(racer, ri, event, ui) {
       <label>prefer <select data-field="racerPrefer" data-ri="${ri}" title="which sighting of this racer matters most">
         ${options(["finish", "neutral", "en_route"], racer.prefer ?? "finish", { finish: "the finish", neutral: "during, then finish", en_route: "during, always" })}
       </select></label>
+      <label title="A plan that misses this finish is worse than any plan that catches it">require their finish ${toggle("racerRequireFinish", racer.require_finish, `data-ri="${ri}"`)}</label>
     </div>
     ${paceLadder(racer, ri, event, ui)}`;
 }
@@ -387,14 +390,15 @@ function advanced(section, content) {
 }
 
 /** Feel-only tunables, kept per browser so they can be tried without a code change. */
-function debugSection(ui) {
+function debugDialog(ui) {
   const rows = Object.entries(DEBUG_DEFAULTS)
     .map(([k, d]) => `<label>${d.label} <span><input type="number" data-field="debug" data-key="${k}" value="${ui.debug[k]}" min="0" step="${d.unit === "%" ? 1 : 50}" size="5"> ${d.unit}</span></label>`)
     .join("");
-  return `<details class="section" data-section="debug">
-      <summary><h2>Debug <button data-act="resetDebug" title="Back to the defaults">↺</button></h2></summary>
+  return `<dialog data-dialog="debug" aria-label="Debug settings">
+      <button data-act="hideDialog" data-dialog="debug" class="dismiss" title="Close" aria-label="Close">✕</button>
+      <h2>Debug <button data-act="resetDebug" title="Back to the defaults" aria-label="Reset the debug settings">↺</button></h2>
       <div class="fields">${rows}</div>
-  </details>`;
+  </dialog>`;
 }
 
 function settingsSection(event, ui) {
@@ -407,9 +411,7 @@ function settingsSection(event, ui) {
         <label>safety buffer <span><input type="number" data-field="buffer" value="${s.safety_buffer_s / 60}" min="0" step="0.5" size="3"> min</span></label>
         <label>min stop <span><input type="number" data-field="minStop" value="${s.min_stop_s / 60}" min="0" size="3"> min</span></label>
         <label>viewpoint spacing <span><input type="number" data-field="spacing" value="${s.viewpoint_spacing_m ?? 120}" min="20" step="10" size="4" title="spots closer than this that see the same courses merge"> m</span></label>
-        <label title="Otherwise, in order: everyone seen the way they prefer, everyone's finish, each preferred sighting, each other sighting, repeats">require every finish <input type="checkbox" data-field="requireFinishes" ${s.objective.require_finishes ? "checked" : ""}></label>
-        <label title="How much each repeat sighting of a racer is worth relative to the previous one">breadth ↔ depth <input type="range" data-field="decay" value="${s.objective.repeat_decay}" min="0" max="0.9" step="0.1"></label>
-        <label>course closed to crossing <input type="checkbox" data-field="courseClosed" ${s.course_closed ? "checked" : ""}></label>
+        <label>course closed to crossing ${toggle("courseClosed", s.course_closed)}</label>
         <label>search effort <select data-field="beam">${options(["16", "64", "256"], String(ui.beam))}</select></label>
       </div>
   </details>`;
@@ -468,6 +470,12 @@ const addButton = (act, locked, what, label = "+") =>
 
 const toolButton = (act, active, idle, working, extra = "") =>
   `<button data-act="${act}" ${extra} class="${active ? "active" : ""}">${active ? working : idle}</button>`;
+
+/** An on/off field, drawn as a slider rather than a checkbox. */
+const toggle = (field, on, attrs = "") =>
+  `<input type="checkbox" class="toggle" data-field="${field}" ${attrs} ${on ? "checked" : ""}>`;
+
+const FLASK = `<svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" d="M6.4 1.8v4L2.8 12a1.3 1.3 0 0 0 1.1 2h8.2a1.3 1.3 0 0 0 1.1-2L9.6 5.8v-4"/><path fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" d="M5.6 1.8h4.8M4.9 10.2h6.2"/></svg>`;
 
 /** A trash-can glyph for remove buttons, so removing never looks like closing. */
 const TRASH = `<svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" d="M2.5 4h11M6.5 4V2.5h3V4M4 4l.7 9.5h6.6L12 4M6.5 7v4M9.5 7v4"/></svg>`;

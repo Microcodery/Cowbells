@@ -55,6 +55,7 @@ pub fn event() -> Event {
                 uncertainty: 0.0,
             }],
             priority: 1.0,
+            require_finish: false,
             prefer: Prefer::EnRoute,
         }],
         spectator: SpectatorConfig {
@@ -71,7 +72,6 @@ pub fn event() -> Event {
             viewpoint_spacing_m: 50.0,
             course_closed: false,
             required_regions: vec![],
-            objective: Objective::default(),
         },
     }
 }

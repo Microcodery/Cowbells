@@ -149,7 +149,7 @@ pub fn solve_with(
         min_stop: spectator.min_stop_s,
         priorities: event.racers.iter().map(|r| r.priority).collect(),
         prefer: event.racers.iter().map(|r| r.prefer).collect(),
-        objective: spectator.objective,
+        require_finish: event.racers.iter().map(|r| r.require_finish).collect(),
         regions,
     };
     let mut router = LegRouter::default();

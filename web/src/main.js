@@ -28,7 +28,7 @@ import { itineraryToGpx } from "./gpx.js";
 import { createMap, currentTheme, fitTo, flyTo, mapCenter, render as renderMap, replayCanvas, revealItinerary, setHover, setTheme } from "./map.js";
 import { createMapData } from "./mapdata.js";
 import { overlay } from "./overlay.js";
-import { closeLoadDialog, openLoadDialog, renderHeader, renderHoverTip, renderPanel, setStatus } from "./panel.js";
+import { closeDialog, openDialog, renderHeader, renderHoverTip, renderPanel, setStatus } from "./panel.js";
 import { planSummary } from "./plans.js";
 import { liveReplay } from "./replay.js";
 import { TIERS, overTierLimit, tierAllows } from "./tiers.js";
@@ -51,7 +51,7 @@ const ui = {
   status: "Draw a course to begin.",
   busy: false,
   beam: 64,
-  unit: UNITS[storedChoice(UNITS_KEY, UNITS, "km")],
+  unit: UNITS[storedChoice(UNITS_KEY, UNITS, "mi")],
   // A stand-in for a real account: what the tier allows is enforced, who pays is not.
   tier: storedChoice(TIER_KEY, TIERS, "free"),
   banner: null,
@@ -340,18 +340,18 @@ const actions = {
   exportGpx() {
     download(`${event.name} spectator.gpx`, itineraryToGpx(ui.itinerary, event), "application/gpx+xml");
   },
-  openLoad() {
-    openLoadDialog(panel);
+  showDialog({ dialog }) {
+    openDialog(panel, dialog);
   },
-  closeLoad() {
-    closeLoadDialog(panel);
+  hideDialog({ dialog }) {
+    closeDialog(panel, dialog);
   },
   async load(_, input) {
     const [file] = input.files;
     if (file) await actions.loadFile(file);
   },
   async loadFile(file) {
-    closeLoadDialog(panel);
+    closeDialog(panel, "load");
     const text = await file.text();
     await run("Loading…", async () => {
       const saved = JSON.parse(text);
@@ -361,7 +361,7 @@ const actions = {
     });
   },
   async example({ example: name }) {
-    closeLoadDialog(panel);
+    closeDialog(panel, "load");
     await run("Loading example…", async () => {
       const response = await fetch(`${import.meta.env.BASE_URL}examples/${name}.bird`);
       if (!response.ok) throw new Error(`example ${name} not found`);
@@ -508,8 +508,7 @@ const actions = {
       buffer: () => (s.safety_buffer_s = number * 60),
       minStop: () => (s.min_stop_s = number * 60),
       spacing: () => (s.viewpoint_spacing_m = number),
-      decay: () => (s.objective.repeat_decay = number),
-      requireFinishes: () => (s.objective.require_finishes = input.checked),
+      racerRequireFinish: () => (racer.require_finish = input.checked),
       courseClosed: () => (s.course_closed = input.checked),
     };
     mutate(() => edits[field]());
