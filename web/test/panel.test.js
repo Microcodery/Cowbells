@@ -3,28 +3,7 @@ import { addCourse, newEvent } from "../src/event.js";
 import { UNITS } from "../src/format.js";
 import { renderPanel } from "../src/panel.js";
 
-const ui = { tool: null, itinerary: null, network: null, osm: null, status: "", busy: false, beam: 64, unit: UNITS.km, tier: "free", debug: { networkMs: 1000, candidatesMs: 1000, mergeMs: 1000, searchMs: 3000, fitMargin: 10, hoverPx: 18, mapDataDelayMs: 1500 } };
-
-describe("tier locks", () => {
-  it("locks the add buttons once Free is used up and frees them on Plus", async () => {
-    const { addPoint, addRacer } = await import("../src/event.js");
-    const root = document.createElement("div");
-    const event = newEvent({ lat: 45, lon: -122 });
-    addCourse(event);
-    addPoint(event.courses[0], { lat: 45, lon: -122 });
-    addPoint(event.courses[0], { lat: 45.01, lon: -122 });
-    addRacer(event, event.courses[0]);
-    addRacer(event, event.courses[0]);
-    renderPanel(root, event, ui, {});
-    expect(root.querySelector("button[data-act=addCourse]")).toBeNull();
-    expect(root.querySelector("button.locked[data-what=courses]")).not.toBeNull();
-    expect(root.querySelector("button.locked[data-what=racers]")).not.toBeNull();
-    expect(root.querySelectorAll("button.locked[data-what=paces]").length).toBe(2);
-    renderPanel(root, event, { ...ui, tier: "plus" }, {});
-    expect(root.querySelector("button.locked")).toBeNull();
-    expect(root.querySelector("button[data-act=addCourse]")).not.toBeNull();
-  });
-});
+const ui = { tool: null, itinerary: null, network: null, osm: null, status: "", busy: false, beam: 64, unit: UNITS.km, debug: { networkMs: 1000, candidatesMs: 1000, mergeMs: 1000, searchMs: 3000, fitMargin: 10, hoverPx: 18, mapDataDelayMs: 1500 } };
 
 describe("the load dialog", () => {
   it("offers a file drop zone and every example behind one Load button", () => {

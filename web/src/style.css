@@ -253,60 +253,6 @@ button.plan.missing {
   border-color: var(--danger);
 }
 
-button.locked {
-  position: relative;
-  color: var(--muted);
-  background: var(--border);
-  cursor: not-allowed;
-}
-
-/* The lock floats over the button's own label so it still reads as what it would do. */
-button.locked .lock {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  opacity: 0.55;
-}
-
-button.locked .lock .icon {
-  height: 100%;
-  width: auto;
-  padding: 2px 0;
-  box-sizing: border-box;
-}
-
-.banner {
-  background: var(--danger);
-  color: #fff;
-  padding: 8px 10px;
-  margin: 10px 0 4px;
-  border-radius: 6px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-
-.banner a {
-  color: #fff;
-  font-weight: 600;
-}
-
-.banner button {
-  margin-left: auto;
-  background: transparent;
-  color: #fff;
-  border-color: rgba(255, 255, 255, 0.5);
-}
-
-button.tier.plus {
-  color: var(--accent);
-  border-color: var(--accent);
-  font-weight: 600;
-}
-
 h2 {
   font-size: 14px;
   margin: 16px 0 6px;
@@ -416,7 +362,12 @@ label {
   gap: 4px;
 }
 
-.segments,
+.segments {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
 .stops {
   margin: 0;
   padding-left: 20px;
@@ -425,6 +376,13 @@ label {
 .segments li,
 .stops li {
   margin: 4px 0;
+}
+
+/* A segment's controls sit on one line together, not hanging from the list marker. */
+.segments li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .stops > li {

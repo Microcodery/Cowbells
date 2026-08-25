@@ -31,11 +31,9 @@ import { overlay } from "./overlay.js";
 import { closeDialog, openDialog, renderHeader, renderHoverTip, renderPanel, setStatus } from "./panel.js";
 import { planSummary } from "./plans.js";
 import { liveReplay } from "./replay.js";
-import { TIERS, overTierLimit, tierAllows } from "./tiers.js";
 
 const EVENT_KEY = "cowbells.event";
 const UNITS_KEY = "cowbells.units";
-const TIER_KEY = "cowbells.tier";
 const DEBUG_KEY = "cowbells.debug";
 const DEFAULT_CENTER = { lat: 45.5231, lon: -122.6765 };
 const AUTOSAVE_DELAY_MS = 500;
@@ -52,9 +50,6 @@ const ui = {
   busy: false,
   beam: 64,
   unit: UNITS[storedChoice(UNITS_KEY, UNITS, "mi")],
-  // A stand-in for a real account: what the tier allows is enforced, who pays is not.
-  tier: storedChoice(TIER_KEY, TIERS, "free"),
-  banner: null,
   debug: loadDebug(),
   // `null` while alternatives are still being explored; then the ones that beat the plan.
   alternatives: null,
@@ -133,20 +128,6 @@ function mutate(edit) {
   invalidatePlan();
   render();
   mapdata.schedule();
-}
-
-/** Applies `edit` only if the event still fits the tier afterwards; otherwise says why not. */
-function mutateWithinTier(edit) {
-  const trial = structuredClone(event);
-  edit(trial);
-  const why = overTierLimit(trial, ui.tier);
-  if (why) {
-    ui.status = `${why} — switch to ${TIERS.plus.label} for more.`;
-    render();
-    return false;
-  }
-  mutate(() => edit(event));
-  return true;
 }
 
 /** Run async work with the panel locked and its outcome in the status line. */
@@ -249,27 +230,8 @@ function download(filename, text, type) {
 }
 
 const actions = {
-  toggleTier() {
-    ui.tier = ui.tier === "free" ? "plus" : "free";
-    localStorage.setItem(TIER_KEY, ui.tier);
-    if (ui.tier === "plus") ui.banner = null;
-    render();
-  },
-  locked({ what }) {
-    ui.banner = `${TIERS[ui.tier].label} includes ${tierAllows(ui.tier, what)}. Upgrade to ${TIERS.plus.label} for more, or`;
-    render();
-  },
-  dismissBanner() {
-    ui.banner = null;
-    render();
-  },
-  resetDebug() {
-    ui.debug = debugDefaults();
-    localStorage.removeItem(DEBUG_KEY);
-    render();
-  },
   addCourse() {
-    if (!mutateWithinTier((e) => addCourse(e))) return;
+    mutate(() => addCourse(event));
     ui.tool = { kind: "draw", courseIndex: event.courses.length - 1 };
     render();
   },
@@ -292,14 +254,14 @@ const actions = {
     mutate(() => mergeWithNext(event.courses[ci], Number(si)));
   },
   addRacer() {
-    mutateWithinTier((e) => addRacer(e, e.courses[0]));
+    mutate(() => addRacer(event, event.courses[0]));
   },
   removeRacer({ ri }) {
     mutate(() => event.racers.splice(Number(ri), 1));
   },
   splitInterval({ ri, ii }) {
     const interval = event.racers[ri].pace_profile[ii];
-    mutateWithinTier((e) => splitInterval(e.racers[ri], Number(ii), (interval.start_m + interval.end_m) / 2));
+    mutate(() => splitInterval(event.racers[ri], Number(ii), (interval.start_m + interval.end_m) / 2));
   },
   mergeInterval({ ri, ii }) {
     mutate(() => mergeInterval(event.racers[ri], Number(ii)));
@@ -367,8 +329,6 @@ const actions = {
       if (!response.ok) throw new Error(`example ${name} not found`);
       const saved = await response.json();
       rebase(saved.event, todayAt("09:00"));
-      // Examples are demos: let them show what Plus allows.
-      if (overTierLimit(saved.event, ui.tier)) actions.toggleTier();
       await adoptEvent(saved.event, saved.osm, "Example loaded.");
     });
   },
@@ -378,8 +338,6 @@ const actions = {
     const bytes = await file.arrayBuffer();
     await run(`Reading ${file.name}…`, async () => {
       const courses = await engine.call("courses", { name: file.name, bytes });
-      const room = TIERS[ui.tier].courses - event.courses.length;
-      if (courses.length > room) throw new Error(`${file.name} has ${courses.length} courses; ${TIERS[ui.tier].label} allows ${TIERS[ui.tier].courses}`);
       for (const course of courses) {
         course.start_time = event.spectator.earliest;
         event.courses.push(course);
@@ -397,7 +355,7 @@ const actions = {
     if (!confirm("Start over? This clears the courses, racers, settings, and fetched map data.")) return;
     event = newEvent(mapCenter(map));
     mapdata.clear();
-    Object.assign(ui, { itinerary: null, alternatives: null, tool: null, banner: null, status: "Draw a course to begin." });
+    Object.assign(ui, { itinerary: null, alternatives: null, tool: null, status: "Draw a course to begin." });
     localStorage.removeItem(EVENT_KEY);
     invalidatePlan();
     render();
@@ -410,8 +368,6 @@ const actions = {
     await run("Planning…", async () => {
       if (!event.courses.length) throw new Error("draw or import a course first");
       if (!event.racers.length) throw new Error("add a racer first");
-      const over = overTierLimit(event, ui.tier);
-      if (over) throw new Error(`${over} — switch to ${TIERS.plus.label} to plan this event`);
       // Map data is normally already in hand from the background fetch; otherwise wait for it.
       mapdata.cancelSchedule();
       await mapdata.ensure();
@@ -459,6 +415,11 @@ const actions = {
       ui.alternatives = [];
       ui.status = `${planSummary(event, itinerary)}. ${await mapdata.buildNetwork()}`;
     });
+  },
+  resetDebug() {
+    ui.debug = debugDefaults();
+    localStorage.removeItem(DEBUG_KEY);
+    render();
   },
   edit({ field, ci, si, ri, ii, gi, key }, input) {
     const number = Number(input.value);

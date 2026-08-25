@@ -5,7 +5,6 @@ import { DEFAULT_SPEED_MPS, averagePace } from "./event.js";
 import { clock, distanceLabel, paceLabel, speedLabel } from "./format.js";
 import { courseLength, polylineLength } from "./geo.js";
 import { planSummary, stopLabel } from "./plans.js";
-import { TIERS, tierLocks, tierSummary } from "./tiers.js";
 
 const MODES = ["run", "bike", "swim", "other"];
 const TRAVEL = ["walk", "bike", "drive"];
@@ -45,7 +44,6 @@ export function renderPanel(root, event, ui, actions) {
   const openedDialog = root.querySelector("dialog[open]")?.dataset.dialog ?? null;
   measureGhost(root, ui.itinerary);
   root.innerHTML = `
-    ${ui.banner ? `<div class="banner">${ui.banner} <a href="${RELEASES}" target="_blank" rel="noopener">Run it yourself</a> <button data-act="dismissBanner" title="Dismiss">✕</button></div>` : ""}
     <section>
       <div class="row">
         <button data-act="save" title="Save event as .bird">Save</button>
@@ -112,7 +110,6 @@ export function renderHeader(root, event, ui, actions) {
     <h1>cowbells</h1>
     <button data-act="plan" class="plan ${ready ? "ready" : "missing"}" ${ui.busy ? "disabled" : ""} title="${why}">Plan</button>
     <span class="row">
-      <button data-act="toggleTier" class="tier ${ui.tier}" title="${tierSummary()}">${TIERS[ui.tier].label}</button>
       <button data-act="theme" title="Light or dark">◐</button>
       <button data-act="units" title="Switch units">${ui.unit.label}</button>
       <button data-act="togglePanel" class="phone-only" title="Options">☰</button>
@@ -252,9 +249,9 @@ function trackGhostDismissal(root) {
 function coursesSection(event, ui) {
   const tool = (kind, index) => ui.tool?.kind === kind && ui.tool.courseIndex === index;
   return `<details class="section" data-section="courses" open>
-    <summary><h2>Courses ${addButton("addCourse", tierLocks(event, ui.tier).courses, "courses")}</h2></summary>
+    <summary><h2>Courses <button data-act="addCourse" title="Add a course" aria-label="Add a course">+</button></h2></summary>
     <div class="row">
-      ${tierLocks(event, ui.tier).courses ? addButton("importCourses", true, "courses", "Import") : `<label class="button" title="Import courses from GPX, KML, KMZ, TCX, FIT, or GeoJSON">Import<input type="file" accept=".gpx,.kml,.kmz,.tcx,.fit,.geojson,.json" data-act="importCourses" hidden ${ui.busy ? "disabled" : ""}></label>`}
+      <label class="button" title="Import courses from GPX, KML, KMZ, TCX, FIT, or GeoJSON">Import<input type="file" accept=".gpx,.kml,.kmz,.tcx,.fit,.geojson,.json" data-act="importCourses" hidden ${ui.busy ? "disabled" : ""}></label>
       <span class="muted">GPX, KML, KMZ, TCX, FIT, GeoJSON</span>
     </div>
     ${event.courses
@@ -273,7 +270,7 @@ function coursesSection(event, ui) {
         <button data-act="undo" data-ci="${ci}">Undo point</button>
         ${toolButton("split", tool("split", ci), "Split", "Click the course", `data-ci="${ci}"`)}
       </div>
-      ${segmentsSection(course, ci)}
+      ${segmentsSection(course, ci, ui)}
     </div>`,
       )
       .join("")}
@@ -281,27 +278,27 @@ function coursesSection(event, ui) {
 }
 
 /** The stretches a course is built from, folded down to how many and how detailed they are. */
-function segmentsSection(course, ci) {
-  const points = course.segments.reduce((total, segment) => total + segment.points.length, 0);
+function segmentsSection(course, ci, ui) {
   const segment = (s, si) => `<li>
+      <span class="muted">${si + 1}</span>
       <select data-field="segmentMode" data-ci="${ci}" data-si="${si}">${options(MODES, s.mode)}</select>
       <label title="Can spectators watch this stretch?">${toggle("viewable", s.viewable, `data-ci="${ci}" data-si="${si}"`)} viewable</label>
-      <span class="muted">${s.points.length} pts</span>
+      <span class="muted">${distanceLabel(polylineLength(s.points), ui.unit, 1)}</span>
       ${si + 1 < course.segments.length ? `<button data-act="merge" data-ci="${ci}" data-si="${si}">merge ↓</button>` : ""}
     </li>`;
   return `<details class="foldout" data-section="course-${course.id}-segments">
     <summary>
       <span>segments ${CARET}</span>
-      <span class="muted">${course.segments.length} · ${points} pts</span>
+      <span class="muted">${course.segments.length}</span>
     </summary>
-    <ol class="segments">${course.segments.map(segment).join("")}</ol>
+    <ul class="segments">${course.segments.map(segment).join("")}</ul>
   </details>`;
 }
 
 function racersSection(event, ui) {
   if (event.courses.length === 0) return "";
   return `<details class="section" data-section="racers">
-    <summary><h2>Racers ${addButton("addRacer", tierLocks(event, ui.tier).racers, "racers")}</h2></summary>
+    <summary><h2>Racers <button data-act="addRacer" title="Add a racer" aria-label="Add a racer">+</button></h2></summary>
     ${event.racers.map((racer, ri) => racerCard(racer, ri, event, ui)).join("")}
   </details>`;
 }
@@ -354,7 +351,6 @@ function racerAdvanced(racer, ri) {
  * between two marks, and a merge on each mark the two legs around it could collapse into.
  */
 function paceLadder(racer, ri, event, ui) {
-  const locked = tierLocks(event, ui.tier).paces(racer);
   const lastLeg = racer.pace_profile.length - 1;
   // The start reads bare, since every mark below it carries the unit.
   const at = (metres) => (metres === 0 ? "0" : distanceLabel(metres, ui.unit, 1));
@@ -367,7 +363,7 @@ function paceLadder(racer, ri, event, ui) {
   const leg = (interval, ii) => `<div class="leg">
       ${paceInput(racer, ri, ii, ui, over(interval))}<span class="muted">/${ui.unit.label}</span>
       <label>&plusmn; ${spreadInput(racer, ri, ii, over(interval))}%</label>
-      ${splitPaceButton(ri, ii, locked, "split", `Split the leg${over(interval)} in half`)}
+      <button data-act="splitInterval" data-ri="${ri}" data-ii="${ii}" title="Split the leg${over(interval)} in half" aria-label="Split the leg${over(interval)} in half">split</button>
     </div>`;
   const rungs = racer.pace_profile.map((interval, ii) => leg(interval, ii) + mark(interval.end_m, ii === lastLeg ? null : ii));
   return `<div class="ladder">${mark(0, null)}${rungs.join("")}</div>`;
@@ -378,9 +374,6 @@ const paceInput = (racer, ri, ii, ui, over = "") =>
 
 const spreadInput = (racer, ri, ii, over = "") =>
   `<input type="number" data-field="uncertainty" data-ri="${ri}" data-ii="${ii}" value="${Math.round(racer.pace_profile[ii].uncertainty * 100)}" min="0" max="99" size="2" aria-label="Pace uncertainty${over}">`;
-
-const splitPaceButton = (ri, ii, locked, label, title) =>
-  locked ? addButton("splitInterval", true, "paces", label) : `<button data-act="splitInterval" data-ri="${ri}" data-ii="${ii}" title="${title}" aria-label="${title}">${label}</button>`;
 
 function spectatorSection(event, ui) {
   const s = event.spectator;
@@ -499,17 +492,7 @@ function selectorFor(element) {
   return keys.map((k) => `[data-${k.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`)}="${element.dataset[k]}"]`).join("");
 }
 
-const RELEASES = "https://github.com/Microcodery/cowbells/releases";
-
-const LOCK = `<svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.5" d="M4.5 7V5a3.5 3.5 0 0 1 7 0v2"/><rect x="3" y="7" width="10" height="7" rx="1.5" fill="currentColor"/></svg>`;
-
 const GEAR = `<svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="2.2" fill="none" stroke="currentColor" stroke-width="1.4"/><path fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" d="M8 1.6v2.1M8 12.3v2.1M1.6 8h2.1M12.3 8h2.1M3.5 3.5l1.5 1.5M11 11l1.5 1.5M12.5 3.5 11 5M5 11l-1.5 1.5"/></svg>`;
-
-/** An "add" button, or the same button greyed under a lock when the tier has no room for another `what`. */
-const addButton = (act, locked, what, label = "+") =>
-  locked
-    ? `<button data-act="locked" data-what="${what}" class="locked" title="${TIERS.plus.label} allows more">${label}<span class="lock">${LOCK}</span></button>`
-    : `<button data-act="${act}">${label}</button>`;
 
 const toolButton = (act, active, idle, working, extra = "") =>
   `<button data-act="${act}" ${extra} class="${active ? "active" : ""}">${active ? working : idle}</button>`;
