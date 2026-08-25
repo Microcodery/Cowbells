@@ -220,12 +220,7 @@ function onMapClick(latlon, metresPerPixel) {
   // Off the course being edited, with no tool active, a tap is a hover: phones cannot hover.
   if (!tool) return onMapHover(latlon, metresPerPixel);
   mutate(() => {
-    if (tool.kind === "draw") {
-      const course = event.courses[tool.courseIndex];
-      addPoint(course, latlon);
-      // A fresh point is a new branch: what was taken back before it can no longer be put back.
-      ui.undone[course.id] = [];
-    }
+    if (tool.kind === "draw") carryOn(event.courses[tool.courseIndex], latlon);
     if (tool.kind === "start") event.spectator.start = latlon;
     if (tool.kind === "end") event.spectator.end = { location: latlon, latest: event.spectator.earliest + 4 * 3600 };
     if (tool.kind === "region") addRegion(event, latlon);
@@ -241,21 +236,34 @@ function onMapClick(latlon, metresPerPixel) {
 
 /**
  * While a course is open for editing, the map answers clicks about its shape: a point offers to
- * move or go, the line between points offers a new one, and anywhere else puts the question away.
+ * move or go, and the line between points offers a new one. A click away from the course puts an
+ * open menu down, or, with nothing open, carries the course on to where it landed.
  */
 /**
  * Runs a reshaping of the course being edited on what the menu points at. An edit the course
- * refuses changes nothing, so the plan it already has survives it.
+ * refuses leaves the menu up and says why, so the plan survives and the click is not mistaken
+ * for one that landed.
  */
-function reshape(edit) {
+function reshape(edit, refusal) {
   const course = event.courses[editingIndex()];
   const menu = ui.menu;
+  if (!course || !menu) {
+    ui.menu = null;
+    return render();
+  }
+  if (!edit(course, menu)) {
+    ui.status = refusal;
+    return render();
+  }
   ui.menu = null;
-  if (!course || !menu) return render();
-  const changed = edit(course, menu);
-  // Drawing has moved on, so points taken back before it can no longer be put back.
-  if (changed) ui.undone[course.id] = [];
-  return changed ? mutate(() => {}) : render();
+  ui.undone[course.id] = [];
+  return mutate(() => {});
+}
+
+/** Carries the course on to `latlon`. Drawing on is a new branch, so nothing taken back can return. */
+function carryOn(course, latlon) {
+  ui.undone[course.id] = [];
+  addPoint(course, latlon);
 }
 
 function closeMapMenu() {
@@ -280,12 +288,19 @@ function onEditClick(latlon, metresPerPixel) {
   if (vertex && vertex.metres <= reach) {
     const { segmentIndex, pointIndex } = vertex;
     ui.menu = { kind: "point", at: course.segments[segmentIndex].points[pointIndex], segmentIndex, pointIndex };
-  } else {
-    const hit = nearestOnEachCourse(event, latlon).find((h) => h.courseIndex === index);
-    const { segmentIndex, pointIndex, latlon: on } = hit ?? {};
-    ui.menu = hit && hit.metres <= reach ? { kind: "line", at: on, segmentIndex, pointIndex } : null;
+    return render();
   }
-  render();
+  const hit = nearestOnEachCourse(event, latlon).find((h) => h.courseIndex === index);
+  if (hit && hit.metres <= reach) {
+    ui.menu = { kind: "line", at: hit.latlon, segmentIndex: hit.segmentIndex, pointIndex: hit.pointIndex };
+    return render();
+  }
+  // Away from the course: put down an open menu, or carry the course on to where the click landed.
+  if (ui.menu) {
+    ui.menu = null;
+    return render();
+  }
+  mutate(() => carryOn(course, latlon));
 }
 
 /**
@@ -393,10 +408,16 @@ const actions = {
     render();
   },
   deletePoint() {
-    reshape((course, { segmentIndex, pointIndex }) => deletePoint(course, segmentIndex, pointIndex));
+    reshape(
+      (course, { segmentIndex, pointIndex }) => deletePoint(course, segmentIndex, pointIndex),
+      "That point holds two segments together, or is the last the segment can spare.",
+    );
   },
   addPointHere() {
-    reshape((course, { segmentIndex, pointIndex, at }) => insertPoint(course, segmentIndex, pointIndex, at));
+    reshape(
+      (course, { segmentIndex, pointIndex, at }) => insertPoint(course, segmentIndex, pointIndex, at),
+      "There is nowhere to put a point there.",
+    );
   },
   merge({ ci, si }) {
     mutate(() => mergeWithNext(event.courses[ci], Number(si)));
