@@ -28,7 +28,7 @@ import { itineraryToGpx } from "./gpx.js";
 import { createMap, currentTheme, fitTo, flyTo, mapCenter, render as renderMap, replayCanvas, revealItinerary, setHover, setTheme } from "./map.js";
 import { createMapData } from "./mapdata.js";
 import { overlay } from "./overlay.js";
-import { renderHeader, renderHoverTip, renderPanel, setStatus } from "./panel.js";
+import { closeLoadDialog, openLoadDialog, renderHeader, renderHoverTip, renderPanel, setStatus } from "./panel.js";
 import { planSummary } from "./plans.js";
 import { liveReplay } from "./replay.js";
 import { TIERS, overTierLimit, tierAllows } from "./tiers.js";
@@ -340,9 +340,19 @@ const actions = {
   exportGpx() {
     download(`${event.name} spectator.gpx`, itineraryToGpx(ui.itinerary, event), "application/gpx+xml");
   },
+  openLoad() {
+    openLoadDialog(panel);
+  },
+  closeLoad() {
+    closeLoadDialog(panel);
+  },
   async load(_, input) {
-    const text = await input.files[0]?.text();
-    if (!text) return;
+    const [file] = input.files;
+    if (file) await actions.loadFile(file);
+  },
+  async loadFile(file) {
+    closeLoadDialog(panel);
+    const text = await file.text();
     await run("Loading…", async () => {
       const saved = JSON.parse(text);
       const loaded = saved.event ?? saved;
@@ -350,9 +360,8 @@ const actions = {
       await adoptEvent(loaded, saved.osm, "Loaded.");
     });
   },
-  async example(_, select) {
-    const name = select.value;
-    if (!name) return;
+  async example({ example: name }) {
+    closeLoadDialog(panel);
     await run("Loading example…", async () => {
       const response = await fetch(`${import.meta.env.BASE_URL}examples/${name}.bird`);
       if (!response.ok) throw new Error(`example ${name} not found`);

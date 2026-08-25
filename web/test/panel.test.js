@@ -26,24 +26,52 @@ describe("tier locks", () => {
   });
 });
 
+describe("the load dialog", () => {
+  it("offers a file drop zone and every example behind one Load button", () => {
+    const root = document.createElement("div");
+    document.body.append(root);
+    renderPanel(root, newEvent({ lat: 45, lon: -122 }), ui, {});
+    expect(root.querySelector("select[data-act=example]"), "the dropdown moved into the dialog").toBeNull();
+    expect(root.querySelector("button[data-act=openLoad]")).not.toBeNull();
+
+    const dialog = root.querySelector("dialog[data-dialog=load]");
+    expect(dialog.querySelector("[data-dropzone] input[type=file]").accept).toContain(".bird");
+    const examples = [...dialog.querySelectorAll("button[data-act=example]")].map((b) => b.dataset.example);
+    expect(examples).toEqual(["three-distances", "uptown-ladder", "colfax"]);
+    root.remove();
+  });
+
+  it("stays open when a background update redraws the panel", () => {
+    const root = document.createElement("div");
+    document.body.append(root);
+    const event = newEvent({ lat: 45, lon: -122 });
+    renderPanel(root, event, ui, {});
+    root.querySelector("dialog[data-dialog=load]").showModal();
+
+    renderPanel(root, event, { ...ui, status: "Fetching map data…" }, {});
+    expect(root.querySelector("dialog[data-dialog=load]").open).toBe(true);
+    root.remove();
+  });
+});
+
 describe("renderPanel", () => {
   it("keeps each section's fold across re-renders", () => {
     const root = document.createElement("div");
     const event = newEvent({ lat: 45, lon: -122 });
     renderPanel(root, event, ui, {});
     const section = (name) => root.querySelector(`details[data-section=${name}]`);
-    expect(section("courses").open, "sections start folded").toBe(false);
-    expect(section("settings").open).toBe(false);
+    expect(section("courses").open, "the sections you start in are open").toBe(true);
+    expect(section("settings").open, "the rest start folded").toBe(false);
     section("settings").open = true;
-    section("courses").open = true;
+    section("courses").open = false;
     renderPanel(root, event, ui, {});
     expect(section("settings").open).toBe(true);
-    expect(section("courses").open).toBe(true);
+    expect(section("courses").open).toBe(false);
     expect(section("racers")).toBeNull();
     addCourse(event);
     renderPanel(root, event, ui, {});
     expect(section("racers").open, "a section appearing for the first time keeps the template default").toBe(false);
-    expect(section("courses").open).toBe(true);
+    expect(section("courses").open).toBe(false);
   });
 });
 

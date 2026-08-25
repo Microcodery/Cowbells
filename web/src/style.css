@@ -357,10 +357,33 @@ label {
   padding-left: 16px;
 }
 
-.paces {
+/* A pace profile read top to bottom: distance marks on the rungs, the pace held on each leg. */
+.ladder {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  margin-top: 8px;
+}
+
+.ladder .mark {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+
+.ladder .mark button {
+  font-size: 12px;
+  padding: 1px 8px;
+}
+
+.ladder .leg {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 12px;
+  padding: 6px 0 6px 12px;
+  border-left: 2px solid var(--border);
 }
 
 details.section > summary {
@@ -372,6 +395,77 @@ details.section > summary h2 {
   display: inline-flex;
   width: calc(100% - 1.5em);
   margin: 12px 0 6px;
+}
+
+dialog[data-dialog] {
+  width: min(23rem, 90vw);
+  padding: 42px 20px 20px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--panel);
+  color: var(--fg);
+}
+
+dialog[data-dialog]::backdrop {
+  background: rgb(0 0 0 / 0.4);
+}
+
+dialog[data-dialog] .dismiss {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  border-color: transparent;
+}
+
+.dropzone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 28px 12px;
+  border: 2px dashed var(--border);
+  border-radius: 10px;
+  cursor: pointer;
+  text-align: center;
+}
+
+.dropzone:hover,
+.dropzone:focus-within,
+.dropzone.over {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* Out of sight but still in the tab order, so the file picker stays reachable by keyboard. */
+.offscreen {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  clip-path: inset(50%);
+}
+
+dialog[data-dialog] > p {
+  margin: 14px 0 8px;
+  text-align: center;
+}
+
+.examples {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.examples button {
+  width: 100%;
+  text-align: left;
 }
 
 /* Rarely-touched controls sit behind a gear. */
@@ -502,5 +596,10 @@ details.advanced[open] > summary {
   details.advanced > summary {
     font-size: 16px;
     min-height: 36px;
+  }
+  /* A leg carries four controls; on a phone they need the room to stack. */
+  .ladder .leg {
+    flex-wrap: wrap;
+    row-gap: 4px;
   }
 }

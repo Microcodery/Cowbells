@@ -144,9 +144,35 @@ export function splitInterval(racer, index, atM) {
 export function mergeInterval(racer, index) {
   const [a, b] = [racer.pace_profile[index], racer.pace_profile[index + 1]];
   if (!b) return;
+  if (b.end_m > a.start_m) {
+    a.seconds_per_km = blendedPace(a, b);
+    a.uncertainty = blendedSpread(a, b);
+  }
   a.end_m = b.end_m;
   racer.pace_profile.splice(index + 1, 1);
 }
+
+/** Legs already run at one pace keep it; otherwise they take the pace that runs both in the same time. */
+function blendedPace(a, b) {
+  if (a.seconds_per_km === b.seconds_per_km) return a.seconds_per_km;
+  const [runA, runB] = [a.end_m - a.start_m, b.end_m - b.start_m];
+  const average = (runA * a.seconds_per_km + runB * b.seconds_per_km) / (runA + runB);
+  return round(average, TENTHS);
+}
+
+/** Spread blends the same way, but as a fraction of one it needs the places a whole percent takes. */
+function blendedSpread(a, b) {
+  if (a.uncertainty === b.uncertainty) return a.uncertainty;
+  const [runA, runB] = [a.end_m - a.start_m, b.end_m - b.start_m];
+  const average = (runA * a.uncertainty + runB * b.uncertainty) / (runA + runB);
+  // Two spreads a whisker under 1 would otherwise round to 1, which the engine rejects.
+  return Math.min(round(average, FRACTION_OF_A_PERCENT), WIDEST_SPREAD);
+}
+
+const TENTHS = 1;
+const FRACTION_OF_A_PERCENT = 4;
+const WIDEST_SPREAD = 0.9999;
+const round = (value, places) => Number(value.toFixed(places));
 
 export function addRegion(event, center) {
   event.spectator.required_regions.push({ center, radius_m: DEFAULT_REGION_RADIUS_M, latest: null });

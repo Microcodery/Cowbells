@@ -16,10 +16,11 @@ const panels = new WeakMap();
 function panelState(root) {
   let state = panels.get(root);
   if (!state) {
-    state = { editingTime: false, pendingRender: null };
+    state = { editingTime: false, pendingRender: null, actions: null };
     panels.set(root, state);
     trackTimeEditing(root, state);
     trackGhostDismissal(root);
+    trackLoadDialog(root, state);
   }
   return state;
 }
@@ -30,6 +31,7 @@ function panelState(root) {
  */
 export function renderPanel(root, event, ui, actions) {
   const state = panelState(root);
+  state.actions = actions;
   // A time input fires change after each segment typed; rebuilding it mid-entry would eat the rest, so wait for blur.
   if (state.editingTime) {
     state.pendingRender = () => renderPanel(root, event, ui, actions);
@@ -39,23 +41,17 @@ export function renderPanel(root, event, ui, actions) {
   const folds = new Map([...root.querySelectorAll("details[data-section]")].map((d) => [d.dataset.section, d.open]));
   const scroll = root.scrollTop;
   const focused = root.contains(document.activeElement) ? selectorFor(document.activeElement) : null;
+  const loadWasOpen = Boolean(root.querySelector(LOAD_DIALOG)?.open);
   measureGhost(root, ui.itinerary);
   root.innerHTML = `
     ${ui.banner ? `<div class="banner">${ui.banner} <a href="${RELEASES}" target="_blank" rel="noopener">Run it yourself</a> <button data-act="dismissBanner" title="Dismiss">✕</button></div>` : ""}
     <section>
       <div class="row">
-        <select data-act="example" ${ui.busy ? "disabled" : ""}>
-          <option value="">Examples…</option>
-          <option value="three-distances">City Park 5K · 10K · half</option>
-          <option value="uptown-ladder">Uptown zigzag, six racers</option>
-          <option value="colfax">Colfax Marathon &amp; Half</option>
-        </select>
-      </div>
-      <div class="row">
         <button data-act="save" title="Save event as .bird">Save</button>
-        <label class="button" title="Load a .bird event">Load<input type="file" accept=".bird,.json" data-act="load" hidden ${ui.busy ? "disabled" : ""}></label>
+        <button data-act="openLoad" title="Open an event or an example" ${ui.busy ? "disabled" : ""}>Load</button>
         <button data-act="reset" title="Start over with an empty event" ${ui.busy ? "disabled" : ""}>Reset</button>
       </div>
+      ${loadDialog(ui)}
       <label>Event <input data-field="name" value="${esc(event.name)}"></label>
     </section>
     ${coursesSection(event, ui)}
@@ -72,9 +68,38 @@ export function renderPanel(root, event, ui, actions) {
     if (folds.has(details.dataset.section)) details.open = folds.get(details.dataset.section);
   }
   root.scrollTop = scroll;
+  // Opening first: showModal moves focus to the dialog, so restoring it afterwards wins.
+  if (loadWasOpen) openLoadDialog(root);
   if (focused) root.querySelector(focused)?.focus({ preventScroll: true });
   bindActions(root, actions);
 }
+
+const LOAD_DIALOG = "dialog[data-dialog=load]";
+
+const EXAMPLES = [
+  { name: "three-distances", label: "City Park 5K · 10K · half" },
+  { name: "uptown-ladder", label: "Uptown zigzag, six racers" },
+  { name: "colfax", label: "Colfax Marathon & Half" },
+];
+
+/** Where an event comes from: a file the user drops or browses to, or one of the examples. */
+function loadDialog(ui) {
+  const example = ({ name, label }) =>
+    `<li><button data-act="example" data-example="${name}" ${ui.busy ? "disabled" : ""}>${esc(label)}</button></li>`;
+  return `<dialog data-dialog="load" aria-label="Open an event">
+    <button data-act="closeLoad" class="dismiss" title="Close" aria-label="Close">✕</button>
+    <label class="dropzone" data-dropzone>
+      <input type="file" accept=".bird,.json" data-act="load" class="offscreen" ${ui.busy ? "disabled" : ""}>
+      <b>Drop an event here</b>
+      <span class="muted">or click to browse for a .bird file</span>
+    </label>
+    <p class="muted">or try an example</p>
+    <ul class="examples">${EXAMPLES.map(example).join("")}</ul>
+  </dialog>`;
+}
+
+export const openLoadDialog = (root) => root.querySelector(LOAD_DIALOG)?.showModal();
+export const closeLoadDialog = (root) => root.querySelector(LOAD_DIALOG)?.close();
 
 /** The bar that stays put: name, the Plan button, theme, and on phones the panel toggle. */
 export function renderHeader(root, event, ui, actions) {
@@ -143,6 +168,37 @@ function trackTimeEditing(root, state) {
   });
 }
 
+/** The load dialog's own gestures: dropping a file on it, and clicking its backdrop to dismiss. */
+function trackLoadDialog(root, state) {
+  const dropzone = (target) => target.closest?.("[data-dropzone]");
+  root.addEventListener("dragover", (e) => {
+    const zone = dropzone(e.target);
+    if (!zone) return;
+    e.preventDefault();
+    zone.classList.add("over");
+  });
+  // Crossing into the zone's own text fires dragleave; only leaving the zone entirely unhighlights it.
+  root.addEventListener("dragleave", (e) => {
+    const zone = dropzone(e.target);
+    if (zone && !zone.contains(e.relatedTarget)) zone.classList.remove("over");
+  });
+  root.addEventListener("drop", (e) => {
+    const zone = dropzone(e.target);
+    if (!zone) return;
+    e.preventDefault();
+    zone.classList.remove("over");
+    const [file] = e.dataTransfer?.files ?? [];
+    if (file) state.actions?.loadFile(file);
+  });
+  // A click lands on the dialog itself both on its backdrop and in its padding; only the backdrop closes.
+  root.addEventListener("click", (e) => {
+    if (!e.target.matches(LOAD_DIALOG)) return;
+    const card = e.target.getBoundingClientRect();
+    const inside = e.clientX >= card.left && e.clientX <= card.right && e.clientY >= card.top && e.clientY <= card.bottom;
+    if (!inside) e.target.close();
+  });
+}
+
 // When the plan goes away, its space stays until the user scrolls up, so the panel does not snap.
 let ghostHeight = null;
 
@@ -167,7 +223,7 @@ function trackGhostDismissal(root) {
 
 function coursesSection(event, ui) {
   const tool = (kind, index) => ui.tool?.kind === kind && ui.tool.courseIndex === index;
-  return `<details class="section" data-section="courses">
+  return `<details class="section" data-section="courses" open>
     <summary><h2>Courses ${addButton("addCourse", tierLocks(event, ui.tier).courses, "courses")}</h2></summary>
     <div class="row">
       ${tierLocks(event, ui.tier).courses ? addButton("importCourses", true, "courses", "Import") : `<label class="button" title="Import courses from GPX, KML, KMZ, TCX, FIT, or GeoJSON">Import<input type="file" accept=".gpx,.kml,.kmz,.tcx,.fit,.geojson,.json" data-act="importCourses" hidden ${ui.busy ? "disabled" : ""}></label>`}
@@ -240,14 +296,6 @@ function paceField(racer, ri, ui) {
 
 /** How the racer runs: when they start, how much they matter, and their pace profile in full. */
 function racerAdvanced(racer, ri, event, ui) {
-  const locked = tierLocks(event, ui.tier).paces(racer);
-  const profile =
-    racer.pace_profile.length === 1
-      ? `<div class="row">
-        <label>&plusmn; ${spreadInput(racer, ri, 0)}%</label>
-        ${splitPaceButton(ri, 0, locked, "Split pace", "Split into two intervals at half distance")}
-      </div>`
-      : `<div class="paces">${racer.pace_profile.map((_, ii) => paceRow(racer, ri, ii, locked, ui)).join("")}</div>`;
   return `<div class="fields">
       <label>start offset <span><input type="number" data-field="racerOffset" data-ri="${ri}" value="${racer.start_offset_s / 60}" step="1" size="4"> min</span></label>
       <label>priority <input type="number" data-field="racerPriority" data-ri="${ri}" value="${racer.priority}" step="0.5" min="0" size="3"></label>
@@ -255,35 +303,46 @@ function racerAdvanced(racer, ri, event, ui) {
         ${options(["finish", "neutral", "en_route"], racer.prefer ?? "finish", { finish: "the finish", neutral: "during, then finish", en_route: "during, always" })}
       </select></label>
     </div>
-    ${profile}`;
+    ${paceLadder(racer, ri, event, ui)}`;
 }
 
-/** One interval of a profile: the stretch it covers, its pace and spread, and how to reshape it. */
-function paceRow(racer, ri, ii, locked, ui) {
-  const p = racer.pace_profile[ii];
-  const merge = ii + 1 < racer.pace_profile.length ? `<button data-act="mergeInterval" data-ri="${ri}" data-ii="${ii}" title="Merge with next">merge ↓</button>` : "";
-  return `<div class="row">
-    <span class="muted">${(p.start_m * ui.unit.perMetre).toFixed(1)}&ndash;${distanceLabel(p.end_m, ui.unit, 1)}</span>
-    ${paceInput(racer, ri, ii, ui)}
-    &plusmn; ${spreadInput(racer, ri, ii)}%
-    ${splitPaceButton(ri, ii, locked, "⋯", "Split this interval in half")}
-    ${merge}
-  </div>`;
+/**
+ * The profile as a ladder: a distance mark at every boundary, the pace held over the leg
+ * between two marks, and a merge on each mark the two legs around it could collapse into.
+ */
+function paceLadder(racer, ri, event, ui) {
+  const locked = tierLocks(event, ui.tier).paces(racer);
+  const lastLeg = racer.pace_profile.length - 1;
+  // The start reads bare, since every mark below it carries the unit.
+  const at = (metres) => (metres === 0 ? "0" : distanceLabel(metres, ui.unit, 1));
+  // Every leg holds identical controls, so each names the stretch it covers to tell them apart.
+  const over = ({ start_m, end_m }) => ` from ${at(start_m)} to ${at(end_m)}`;
+  const mark = (metres, mergeIndex) => `<div class="mark">
+      <span>${at(metres)}</span>
+      ${mergeIndex === null ? "" : `<button data-act="mergeInterval" data-ri="${ri}" data-ii="${mergeIndex}" title="Merge the legs meeting at ${at(metres)}" aria-label="Merge the legs meeting at ${at(metres)}">merge</button>`}
+    </div>`;
+  const leg = (interval, ii) => `<div class="leg">
+      ${paceInput(racer, ri, ii, ui, over(interval))}<span class="muted">/${ui.unit.label}</span>
+      <label>&plusmn; ${spreadInput(racer, ri, ii, over(interval))}%</label>
+      ${splitPaceButton(ri, ii, locked, "split", `Split the leg${over(interval)} in half`)}
+    </div>`;
+  const rungs = racer.pace_profile.map((interval, ii) => leg(interval, ii) + mark(interval.end_m, ii === lastLeg ? null : ii));
+  return `<div class="ladder">${mark(0, null)}${rungs.join("")}</div>`;
 }
 
-const paceInput = (racer, ri, ii, ui) =>
-  `<input data-field="pace" data-ri="${ri}" data-ii="${ii}" value="${paceLabel(racer.pace_profile[ii].seconds_per_km, ui.unit)}" size="5" title="min:sec per ${ui.unit.label}" aria-label="Pace">`;
+const paceInput = (racer, ri, ii, ui, over = "") =>
+  `<input data-field="pace" data-ri="${ri}" data-ii="${ii}" value="${paceLabel(racer.pace_profile[ii].seconds_per_km, ui.unit)}" size="5" title="min:sec per ${ui.unit.label}" aria-label="Pace${over}">`;
 
-const spreadInput = (racer, ri, ii) =>
-  `<input type="number" data-field="uncertainty" data-ri="${ri}" data-ii="${ii}" value="${Math.round(racer.pace_profile[ii].uncertainty * 100)}" min="0" max="99" size="2" aria-label="Pace uncertainty">`;
+const spreadInput = (racer, ri, ii, over = "") =>
+  `<input type="number" data-field="uncertainty" data-ri="${ri}" data-ii="${ii}" value="${Math.round(racer.pace_profile[ii].uncertainty * 100)}" min="0" max="99" size="2" aria-label="Pace uncertainty${over}">`;
 
 const splitPaceButton = (ri, ii, locked, label, title) =>
-  locked ? addButton("splitInterval", true, "paces", label) : `<button data-act="splitInterval" data-ri="${ri}" data-ii="${ii}" title="${title}">${label}</button>`;
+  locked ? addButton("splitInterval", true, "paces", label) : `<button data-act="splitInterval" data-ri="${ri}" data-ii="${ii}" title="${title}" aria-label="${title}">${label}</button>`;
 
 function spectatorSection(event, ui) {
   const s = event.spectator;
   const tool = (kind) => ui.tool?.kind === kind;
-  return `<details class="section" data-section="spectator">
+  return `<details class="section" data-section="spectator" open>
     <summary><h2>Spectator</h2></summary>
     <div class="fields">
       <label>out from <input type="time" data-field="earliest" value="${clock(s.earliest)}"></label>
