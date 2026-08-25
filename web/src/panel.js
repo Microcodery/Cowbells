@@ -318,7 +318,6 @@ function courseTools(course, ci, ui) {
   }
   const tool = (kind) => ui.tool?.kind === kind && ui.tool.courseIndex === ci;
   return `<div class="row">
-    ${toolButton("draw", tool("draw"), "Draw", "Drawing… (every click adds a point)", `data-ci="${ci}"`)}
     <button data-act="undo" data-ci="${ci}">Undo point</button>
     <button data-act="redo" data-ci="${ci}" ${ui.undone[course.id]?.length ? "" : "disabled"}>Redo point</button>
     ${toolButton("split", tool("split"), "Split", "Click the course", `data-ci="${ci}"`)}

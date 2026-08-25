@@ -222,7 +222,6 @@ function onMapClick(latlon, metresPerPixel) {
   // Off the course being edited, with no tool active, a tap is a hover: phones cannot hover.
   if (!tool) return onMapHover(latlon, metresPerPixel);
   mutate(() => {
-    if (tool.kind === "draw") carryOn(event.courses[tool.courseIndex], latlon);
     if (tool.kind === "start") event.spectator.start = latlon;
     if (tool.kind === "end") event.spectator.end = { location: latlon, latest: event.spectator.earliest + 4 * 3600 };
     if (tool.kind === "region") addRegion(event, latlon);
@@ -232,7 +231,7 @@ function onMapClick(latlon, metresPerPixel) {
         splitSegment(event.courses[hit.courseIndex], hit.segmentIndex, hit.pointIndex, hit.latlon);
       }
     }
-    if (tool.kind !== "draw") ui.tool = null;
+    ui.tool = null;
   });
 }
 
@@ -260,12 +259,6 @@ function reshape(edit, refusal) {
   ui.menu = null;
   ui.undone[course.id] = [];
   return mutate(() => {});
-}
-
-/** Carries the course on to `latlon`. Drawing on is a new branch, so nothing taken back can return. */
-function carryOn(course, latlon) {
-  ui.undone[course.id] = [];
-  addPoint(course, latlon);
 }
 
 function closeMapMenu() {
@@ -302,7 +295,11 @@ function onEditClick(latlon, metresPerPixel) {
     ui.menu = null;
     return render();
   }
-  mutate(() => carryOn(course, latlon));
+  mutate(() => {
+    // Drawing on is a new branch, so nothing taken back can be put back.
+    ui.undone[course.id] = [];
+    addPoint(course, latlon);
+  });
 }
 
 /**
@@ -365,8 +362,8 @@ function download(filename, text, type) {
 const actions = {
   addCourse() {
     mutate(() => addCourse(event));
+    // A new course has no shape yet, so it opens ready for one: clicks on the map draw it.
     ui.editing = event.courses.at(-1).id;
-    ui.tool = { kind: "draw", courseIndex: event.courses.length - 1 };
     render();
   },
   endRename() {
@@ -398,9 +395,6 @@ const actions = {
       removeCourse(event, event.courses[ci]);
       ui.tool = null;
     });
-  },
-  draw({ ci }) {
-    toggleTool("draw", Number(ci));
   },
   undo({ ci }) {
     const course = event.courses[ci];
