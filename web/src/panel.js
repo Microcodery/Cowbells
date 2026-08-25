@@ -297,11 +297,11 @@ function coursesSection(event, ui) {
         (course, ci) => `<div class="card course" style="border-left-color: ${COURSE_COLORS[ci % COURSE_COLORS.length]}">
       <div class="row">
         <input data-field="courseName" data-ci="${ci}" value="${esc(course.name)}" aria-label="Course name">
+        <span class="muted">${distanceLabel(courseLength(course), ui.unit)}</span>
         <button data-act="removeCourse" data-ci="${ci}" title="Remove course" aria-label="Remove course">${TRASH}</button>
       </div>
       <div class="fields">
         <label>starts <input type="time" data-field="courseStart" data-ci="${ci}" value="${clock(course.start_time)}"></label>
-        <label>length <span class="muted">${distanceLabel(courseLength(course), ui.unit)}</span></label>
       </div>
       ${courseTools(course, ci, ui)}
       ${segmentsSection(course, ci, ui)}
