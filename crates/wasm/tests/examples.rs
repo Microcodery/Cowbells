@@ -14,9 +14,8 @@ struct Expected {
 }
 
 const EXPECTED: &[Expected] = &[
-    Expected { name: "downtown-loop", seen_en_route: 2, finished: 2, racers: 2, stops: 2 },
-    Expected { name: "three-distances", seen_en_route: 2, finished: 5, racers: 5, stops: 2 },
-    Expected { name: "hawthorne-belmont", seen_en_route: 3, finished: 6, racers: 6, stops: 2 },
+    Expected { name: "three-distances", seen_en_route: 3, finished: 5, racers: 5, stops: 3 },
+    Expected { name: "uptown-ladder", seen_en_route: 6, finished: 1, racers: 6, stops: 4 },
 ];
 
 fn plan(name: &str) -> (Value, Value) {

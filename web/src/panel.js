@@ -46,9 +46,8 @@ export function renderPanel(root, event, ui, actions) {
       <div class="row">
         <select data-act="example" ${ui.busy ? "disabled" : ""}>
           <option value="">Examples…</option>
-          <option value="downtown-loop">Downtown loop</option>
-          <option value="three-distances">5K · 10K · half marathon</option>
-          <option value="hawthorne-belmont">Out-and-back, six racers</option>
+          <option value="three-distances">City Park 5K · 10K · half</option>
+          <option value="uptown-ladder">Uptown zigzag, six racers</option>
           <option value="colfax">Colfax Marathon &amp; Half</option>
         </select>
       </div>

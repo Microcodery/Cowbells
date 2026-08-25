@@ -47,12 +47,12 @@ Runs entirely in the browser as a static page: no account, no backend.
 - **Files:** save/load the whole event as a `.bird` file; export the
   spectator's itinerary as GPX (a track plus a waypoint per stop).
 - **Examples:** sample `.bird` events in the header dropdown, map data
-  included — a downtown loop with two racers; a 5K, 10K, and half marathon
-  sharing start and finish with five racers; and an 8.6 km out-and-back whose
-  outbound and return legs run three blocks apart, with six racers; and the
-  Denver Colfax Marathon and Half Marathon together, from the official course
-  files, with Cat running the half and Cat's Friend the full (this one fetches
-  its map data when first planned; the others bundle theirs). Each is
+  included — a 5K, 10K, and half marathon lapping Denver's City Park with
+  five racers; a 7.8 km zigzag through Uptown and City Park West that folds
+  past itself at four corners, with six racers; and the Denver Colfax
+  Marathon and Half Marathon together, from the official course files, with
+  Cat running the half and Cat's Friend the full (this one fetches its map
+  data when first planned; the others bundle theirs). Each is
   also a regression test (`crates/wasm/tests/examples.rs`) pinning the levels
   its plan must reach.
 
