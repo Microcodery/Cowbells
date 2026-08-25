@@ -1,7 +1,7 @@
 name: pages
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
   workflow_dispatch:
 permissions:
   contents: read
@@ -17,11 +17,17 @@ jobs:
       name: github-pages
       url: ${{ steps.deploy.outputs.page_url }}
     steps:
+      # Always main, whichever branch triggered the run: the site root is main and /dev is dev,
+      # so every run rebuilds both.
       - uses: actions/checkout@v4
+        with:
+          ref: main
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
+        with:
+          key: pages
       - uses: taiki-e/install-action@v2
         with:
           tool: wasm-pack
@@ -30,10 +36,26 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: web/package-lock.json
-      - run: npm --prefix web ci
-      - run: make build
+      - name: Build main into the site root
+        run: |
+          npm --prefix web ci
+          make build
+          mv web/dist site
+      - name: Build dev into /dev when the branch exists
+        run: |
+          if ! git ls-remote --exit-code --heads origin dev; then
+            echo "no dev branch yet; publishing main alone"
+            exit 0
+          fi
+          git fetch --depth 1 origin dev
+          git checkout --force FETCH_HEAD
+          # wasm-pack overwrites its outputs but never prunes, so main's snippets would linger.
+          rm -rf crates/wasm/pkg
+          npm --prefix web ci
+          make build
+          mv web/dist site/dev
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: web/dist
+          path: site
       - id: deploy
         uses: actions/deploy-pages@v4

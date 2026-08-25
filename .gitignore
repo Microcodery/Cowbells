@@ -3,3 +3,4 @@
 /crates/wasm/pkg
 /web/node_modules
 /web/dist
+/site
