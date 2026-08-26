@@ -297,22 +297,29 @@ function coursesSection(event, ui) {
       <label class="button" title="Import courses from GPX, KML, KMZ, TCX, FIT, or GeoJSON">Import<input type="file" accept=".gpx,.kml,.kmz,.tcx,.fit,.geojson,.json" data-act="importCourses" hidden ${ui.busy ? "disabled" : ""}></label>
       <span class="muted">GPX, KML, KMZ, TCX, FIT, GeoJSON</span>
     </div>
-    ${event.courses
-      .map(
-        (course, ci) => `<div class="card course" style="border-left-color: ${COURSE_COLORS[ci % COURSE_COLORS.length]}">
-      <div class="row">
-        <input data-field="courseName" data-ci="${ci}" value="${esc(course.name)}" aria-label="Course name">
-        <span class="muted">${distanceLabel(courseLength(course), ui.unit)}</span>
-        <button data-act="removeCourse" data-ci="${ci}" title="Remove course" aria-label="Remove course">${TRASH}</button>
-      </div>
-      <div class="fields">
-        <label>starts <input type="time" data-field="courseStart" data-ci="${ci}" value="${clock(course.start_time)}"></label>
-      </div>
-      ${courseTools(course, ci, ui)}
-      ${segmentsSection(course, ci, ui)}
-    </div>`,
-      )
-      .join("")}
+    ${event.courses.map((course, ci) => courseCard(course, ci, ui)).join("")}
+  </details>`;
+}
+
+/** A course folded down to its name and length, opening to when it starts and how it is drawn. */
+function courseCard(course, ci, ui) {
+  // A course open for editing shows its tools; folding it away while drawing would hide them.
+  const editing = ui.editing === course.id;
+  return `<details class="card course" data-section="course-${course.id}" ${editing ? "open" : ""} style="border-left-color: ${COURSE_COLORS[ci % COURSE_COLORS.length]}">
+    <summary>
+      ${
+        ui.renaming === course.id
+          ? `<input class="rename" data-field="courseName" data-ci="${ci}" value="${esc(course.name)}" aria-label="Course name">`
+          : `<span class="name" data-act="renameCourse" data-ci="${ci}" tabindex="0" role="button" title="Rename">${esc(course.name)}</span>`
+      }
+      <span class="muted">${distanceLabel(courseLength(course), ui.unit)}</span>
+      <button data-act="removeCourse" data-ci="${ci}" title="Remove course" aria-label="Remove course">${TRASH}</button>
+    </summary>
+    <div class="fields">
+      <label>starts <input type="time" data-field="courseStart" data-ci="${ci}" value="${clock(course.start_time)}"></label>
+    </div>
+    ${courseTools(course, ci, ui)}
+    ${segmentsSection(course, ci, ui)}
   </details>`;
 }
 
@@ -377,7 +384,7 @@ function racersSection(event, ui) {
 /** A racer folded down to name, course, and pace, with the rest behind the gear. */
 function racerCard(racer, ri, event, ui) {
   const course = event.courses.find((c) => c.id === racer.course_id)?.name ?? "";
-  return `<details class="card" data-section="racer-${racer.id}" open>
+  return `<details class="card" data-section="racer-${racer.id}">
     <summary>
       ${
         ui.renaming === racer.id

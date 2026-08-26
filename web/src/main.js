@@ -294,6 +294,14 @@ function onMapClick(latlon, at) {
   });
 }
 
+/** A closed card opens on the first click of its name; only an open one gives way to a field. */
+function openThenRename(kind, id) {
+  const card = panel.querySelector(`details[data-section="${kind}-${id}"]`);
+  if (card && !card.open) card.open = true;
+  else ui.renaming = id;
+  render();
+}
+
 /** The course open for editing, if one is. */
 const editedCourse = () => event.courses[editingIndex()] ?? null;
 
@@ -480,10 +488,11 @@ function download(filename, text, type) {
 
 const actions = {
   addCourse() {
-    mutate(() => addCourse(event));
-    // A new course has no shape yet, so it opens ready for one: clicks on the map draw it.
-    ui.editing = event.courses.at(-1).id;
-    render();
+    // Editing is set before the card is first drawn: the panel keeps whatever fold it saw first,
+    // and a new course has no shape yet, so it opens ready for one and map clicks draw it.
+    mutate(() => {
+      ui.editing = addCourse(event).id;
+    });
   },
   endRename() {
     if (!ui.renaming) return;
@@ -491,12 +500,10 @@ const actions = {
     render();
   },
   renameRacer({ ri }) {
-    const racer = event.racers[ri];
-    const card = panel.querySelector(`details[data-section="racer-${racer.id}"]`);
-    // A closed card opens on the first click; the name gives way to a field only once it is open.
-    if (card && !card.open) card.open = true;
-    else ui.renaming = racer.id;
-    render();
+    openThenRename("racer", event.racers[ri].id);
+  },
+  renameCourse({ ci }) {
+    openThenRename("course", event.courses[ci].id);
   },
   editCourse({ ci }) {
     const course = event.courses[ci];
@@ -512,6 +519,7 @@ const actions = {
     const { id } = event.courses[ci];
     delete ui.shapes[id];
     if (ui.editing === id) ui.editing = null;
+    if (ui.renaming === id) ui.renaming = null;
     mutate(() => {
       removeCourse(event, event.courses[ci]);
       ui.tool = null;
@@ -551,7 +559,7 @@ const actions = {
     mutate(() => addRacer(event, event.courses[0]));
   },
   removeRacer({ ri }) {
-    ui.renaming = null;
+    if (ui.renaming === event.racers[ri].id) ui.renaming = null;
     mutate(() => event.racers.splice(Number(ri), 1));
   },
   splitInterval({ ri, ii }) {
@@ -740,7 +748,12 @@ const actions = {
     const s = event.spectator;
     const edits = {
       name: () => (event.name = input.value),
-      courseName: () => (course.name = input.value),
+      // A name taken here ends its own renaming. Leaving the field would too, but the redraw this
+      // edit sets off tears the field out before the browser can report that it was left.
+      courseName: () => {
+        course.name = input.value;
+        ui.renaming = null;
+      },
       courseStart: () => (course.start_time = withClock(course.start_time, input.value)),
       segmentMode: () => (course.segments[si].mode = input.value),
       // Held spinners nudge a boundary a tick at a time; all of one boundary's ticks undo together.
